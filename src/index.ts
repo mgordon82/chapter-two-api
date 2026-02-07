@@ -8,6 +8,8 @@ import { analyzeLimiter, analyzeFailsafe } from './middleware/analyzeRateLimit';
 
 const app = express();
 
+app.set('trust proxy', 1);
+
 app.use(helmet());
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
