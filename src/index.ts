@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 
-import { storyRouter } from './routes/story';
+import { mealRouter } from './routes/meal';
 import { analyzeLimiter, analyzeFailsafe } from './middleware/analyzeRateLimit';
 
 const app = express();
@@ -28,9 +28,9 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', message: 'Chapter Two backend alive' });
 });
 
-app.use('/api/stories/analyze', analyzeLimiter, analyzeFailsafe);
+app.use('/api/plan/analyze', analyzeLimiter, analyzeFailsafe);
 
-app.use('/api/stories', storyRouter);
+app.use('/api/plan', mealRouter);
 
 app.use((req, res) => {
   res.status(404).json({
