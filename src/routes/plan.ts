@@ -6,7 +6,7 @@ import { openai, OPENAI_MODEL } from '../config/openai';
 export const planRouter = Router();
 
 const mealPlanRequestSchema = z.object({
-  storyText: z.string().min(20, 'Story should be at least 20 characters.')
+  planText: z.string().min(20, 'Plan should be at least 20 characters.')
 });
 
 const mealPlanResponseSchema = z.object({

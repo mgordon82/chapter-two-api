@@ -1,11 +1,11 @@
-export interface StoryAuditMetadata {
-  storyLength: number;
+export interface PlanAuditMetadata {
+  planLength: number;
   receivedAt: string;
   unfairnessScore?: number;
   model?: string;
 }
 
-export function scrubStoryText(raw: string): string {
+export function scrubPlanText(raw: string): string {
   let scrubbed = raw;
 
   scrubbed = scrubbed.replace(
@@ -23,18 +23,18 @@ export function scrubStoryText(raw: string): string {
 
 const PRIVACY_MODE = process.env.FH_PRIVACY_MODE || 'strict';
 
-export function logStoryAudit(meta: StoryAuditMetadata) {
+export function logPlanAudit(meta: PlanAuditMetadata) {
   if (PRIVACY_MODE === 'strict') {
     return;
   }
 
-  const { storyLength, receivedAt, unfairnessScore, model } = meta;
+  const { planLength, receivedAt, unfairnessScore, model } = meta;
 
   console.log(
     '[Chapter Two Audit]',
     JSON.stringify(
       {
-        storyLength,
+        planLength,
         receivedAt,
         unfairnessScore,
         model

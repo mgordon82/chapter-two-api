@@ -14,7 +14,7 @@ export interface ChapterTwoAnalysis {
   reframes: string[];
   safetyNotes?: string[];
   metadata: {
-    storyLength: number;
+    planLength: number;
     receivedAt: string;
     context?: any;
     model?: string;
