@@ -5,106 +5,130 @@ import { openai, OPENAI_MODEL } from '../config/openai';
 
 export const planRouter = Router();
 
+/**
+ * Request schema
+ */
 const mealPlanRequestSchema = z.object({
-  planText: z.string().min(20, 'Plan should be at least 20 characters.')
+  planText: z
+    .string()
+    .transform((s) => s.trim())
+    .refine(
+      (s) => s.length >= 5,
+      'Please enter your macros and any restrictions.'
+    )
+});
+
+type MealPlanRequest = z.infer<typeof mealPlanRequestSchema>;
+
+/**
+ * Response schema (AI output)
+ */
+const macroTotalsSchema = z.object({
+  calories: z.number().min(0),
+  protein: z.number().min(0),
+  carbs: z.number().min(0),
+  fat: z.number().min(0)
 });
 
 const mealPlanResponseSchema = z.object({
   assumptions: z.object({
-    mealsPerDay: z.number(),
+    mealsPerDay: z.number().int().min(1).max(8),
     notes: z.string()
   }),
-  dailyTargets: z.object({
-    calories: z.number(),
-    protein: z.number(),
-    carbs: z.number(),
-    fat: z.number()
-  }),
-  meals: z.array(
-    z.object({
-      name: z.string(),
-      mealType: z.enum(['breakfast', 'lunch', 'dinner', 'snack']),
-      description: z.string(),
-      portionGuidance: z.string(),
-      estimatedMacros: z.object({
-        calories: z.number(),
-        protein: z.number(),
-        carbs: z.number(),
-        fat: z.number()
-      }),
-      swapOptions: z.array(z.string()).default([])
-    })
-  ),
+  dailyTargets: macroTotalsSchema,
+  meals: z
+    .array(
+      z.object({
+        name: z.string(),
+        mealType: z.enum(['breakfast', 'lunch', 'dinner', 'snack']),
+        description: z.string(),
+        portionGuidance: z.string(),
+        estimatedMacros: macroTotalsSchema,
+        swapOptions: z.array(z.string()).default([])
+      })
+    )
+    .min(1),
   notes: z.string()
 });
 
-type MealPlanRequest = z.infer<typeof mealPlanRequestSchema>;
 type MealPlanResponse = z.infer<typeof mealPlanResponseSchema>;
 
+/**
+ * System prompt (tight + no contradictions)
+ */
 const systemPrompt = `
-You are Chapter Two AI, an assistant that helps users create meal plans or recipe ideas based on the macros they enter and any dietary restrictions or preferences.
+You are Chapter Two AI. Create meal ideas that fit the user's macro targets and any dietary restrictions/preferences mentioned.
 
-Your role is to:
-- Translate the user’s target macros (calories, protein, carbs, fats) into practical meal or recipe examples.
-- Suggest rough portion sizes that reasonably fit those macros (approximate values are acceptable).
-- Respect dietary restrictions, allergies, and food preferences provided by the user.
-- Offer multiple options so the user can choose what best fits their taste and lifestyle.
+Rules:
+- Output ONLY a single JSON object that matches the provided schema. No extra keys. No markdown.
+- Use everyday foods. Keep meals simple and realistic.
+- Macro numbers are rough estimates, not exact calculations.
+- Do not give medical advice or guarantee outcomes.
 
-Guidelines:
-- Use realistic, everyday foods that are easy to prepare or commonly available.
-- Macro estimates should be approximate, not exact.
-- Prefer simple meals unless the user explicitly requests complex recipes.
-- When useful, include small swaps or adjustments to raise or lower specific macros.
+If key information is missing (e.g., meals per day), make reasonable assumptions and write them in assumptions.notes.
+Do NOT ask questions.
 
-Constraints:
-- Do not provide medical or therapeutic dietary advice.
-- Do not guarantee outcomes (weight loss, muscle gain, health improvements).
-- Avoid moralizing food choices.
-
-Style & tone:
-- Supportive, practical, and non-judgmental.
-- Clear and concise.
-
-If key information is missing (e.g., meals per day, cuisine preferences), make reasonable assumptions and note them briefly, or ask one clarifying question.
-
-You must respond only with a single JSON object matching the schema you were given. Do not include prose, explanations, or formatting outside that JSON.
+Output size limits:
+- Create a practical day plan with 3–5 meals total (include snacks only if it helps hit targets).
+- swapOptions: 0–3 short items max per meal.
 `.trim();
 
 planRouter.post('/analyze', async (req, res) => {
-  const parseResult = mealPlanRequestSchema.safeParse(req.body);
+  const requestId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 
-  if (!parseResult.success) {
+  // Helpful: log body keys to catch mismatches fast
+  console.log(`[PLAN:${requestId}] bodyKeys=`, Object.keys(req.body ?? {}));
+
+  const parsedReq = mealPlanRequestSchema.safeParse(req.body);
+  if (!parsedReq.success) {
+    const details = parsedReq.error.flatten();
+    console.log(`[PLAN:${requestId}] validation_failed=`, details);
+
     return res.status(400).json({
       error: 'Invalid request body',
-      details: parseResult.error.flatten()
+      requestId,
+      details
     });
   }
 
-  const payload: MealPlanRequest = parseResult.data;
+  const { planText } = parsedReq.data as MealPlanRequest;
+  console.log(`[PLAN:${requestId}] planTextLength=${planText.length}`);
 
   try {
+    const t0 = Date.now();
+
     const response = await openai.responses.parse({
       model: OPENAI_MODEL,
       input: [
         { role: 'system', content: systemPrompt },
-        {
-          role: 'user',
-          content: JSON.stringify(payload)
-        }
+        // ✅ send raw text, not JSON-wrapped payload
+        { role: 'user', content: planText }
       ],
+      // If your SDK supports it, uncomment to cap output:
+      // max_output_tokens: 900,
       text: {
         format: zodTextFormat(mealPlanResponseSchema, 'ChapterTwoMealPlan')
       }
     });
 
-    const parsed = response.output_parsed as MealPlanResponse;
+    console.log(`[PLAN:${requestId}] openai_ms=${Date.now() - t0}`);
 
-    return res.json(parsed);
-  } catch (error: any) {
-    console.error('Error generating meal plan:', error?.response ?? error);
+    const plan = response.output_parsed as MealPlanResponse;
+
+    console.log(
+      `[PLAN:${requestId}] ok meals=${plan.meals?.length ?? 0} targets=${
+        plan.dailyTargets.calories
+      }kcal`
+    );
+    res.setHeader('x-request-id', requestId);
+    return res.json(plan);
+  } catch (err: any) {
+    // Log rich server-side, return safe client error
+    console.error(`[PLAN:${requestId}] error=`, err?.response ?? err);
 
     return res.status(500).json({
-      error: 'Failed to generate meal plan at this time.'
+      error: 'Failed to generate meal plan at this time.',
+      requestId
     });
   }
 });

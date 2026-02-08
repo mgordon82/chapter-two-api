@@ -19,6 +19,28 @@ app.use((req, _res, next) => {
   next();
 });
 
+app.use((req, res, next) => {
+  const start = Date.now();
+
+  res.on('finish', () => {
+    console.log(
+      `[RES] ${req.method} ${req.path} -> ${res.statusCode} (${
+        Date.now() - start
+      }ms)`
+    );
+  });
+
+  res.on('close', () => {
+    console.log(
+      `[CLOSE] ${req.method} ${req.path} closed early after ${
+        Date.now() - start
+      }ms`
+    );
+  });
+
+  next();
+});
+
 app.get('/', (_req, res) => {
   res.json({
     status: 'ok',
