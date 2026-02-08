@@ -3,19 +3,12 @@ import { z } from 'zod';
 import { zodTextFormat } from 'openai/helpers/zod';
 import { openai, OPENAI_MODEL } from '../config/openai';
 
-export const mealRouter = Router();
+export const planRouter = Router();
 
-/**
- * Request schema: macro-driven meal planning inputs
- * Keep it flexible + minimal for v1.
- */
 const mealPlanRequestSchema = z.object({
   storyText: z.string().min(20, 'Story should be at least 20 characters.')
 });
 
-/**
- * Response schema: matches the JSON contract from your system prompt.
- */
 const mealPlanResponseSchema = z.object({
   assumptions: z.object({
     mealsPerDay: z.number(),
@@ -77,12 +70,7 @@ If key information is missing (e.g., meals per day, cuisine preferences), make r
 You must respond only with a single JSON object matching the schema you were given. Do not include prose, explanations, or formatting outside that JSON.
 `.trim();
 
-/**
- * POST /meal/plan
- * Body: MealPlanRequest
- * Returns: MealPlanResponse (+ optional metadata if you want later)
- */
-mealRouter.post('/analyze', async (req, res) => {
+planRouter.post('/analyze', async (req, res) => {
   const parseResult = mealPlanRequestSchema.safeParse(req.body);
 
   if (!parseResult.success) {
@@ -110,9 +98,6 @@ mealRouter.post('/analyze', async (req, res) => {
     });
 
     const parsed = response.output_parsed as MealPlanResponse;
-
-    // Optional: light sanity check that totals roughly align (non-blocking)
-    // You can add warnings into `notes` later if you want.
 
     return res.json(parsed);
   } catch (error: any) {

@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 
-import { mealRouter } from './routes/meal';
+import { planRouter } from './routes/plan';
 import { analyzeLimiter, analyzeFailsafe } from './middleware/analyzeRateLimit';
 
 const app = express();
@@ -32,7 +32,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/plan/analyze', analyzeLimiter, analyzeFailsafe);
 
-app.use('/api/plan', mealRouter);
+app.use('/api/plan', planRouter);
 
 app.use((req, res) => {
   res.status(404).json({
