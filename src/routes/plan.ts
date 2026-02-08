@@ -5,7 +5,10 @@ import { openai, OPENAI_MODEL } from '../config/openai';
 
 export const planRouter = Router();
 
-const mealPlanRequestSchema = z.object({
+/**
+ * Legacy request (free-form text)
+ */
+const mealPlanTextRequestSchema = z.object({
   planText: z
     .string()
     .transform((s) => s.trim())
@@ -14,6 +17,28 @@ const mealPlanRequestSchema = z.object({
       'Please enter your macros and any restrictions.'
     )
 });
+
+/**
+ * New request (structured macros)
+ * Note: UI sends "fats", response schema uses "fat".
+ */
+const mealPlanMacrosRequestSchema = z.object({
+  macros: z.object({
+    calories: z.number().int().min(0),
+    protein: z.number().int().min(0),
+    carbs: z.number().int().min(0),
+    fats: z.number().int().min(0)
+  }),
+  restrictions: z
+    .string()
+    .optional()
+    .transform((s) => (s ?? '').trim())
+});
+
+const mealPlanRequestSchema = z.union([
+  mealPlanTextRequestSchema,
+  mealPlanMacrosRequestSchema
+]);
 
 type MealPlanRequest = z.infer<typeof mealPlanRequestSchema>;
 
@@ -95,18 +120,28 @@ OUTPUT CONSTRAINTS (MUST FOLLOW):
 - notes max ~160 characters.
 - Use concise wording throughout.
 - Output ONLY valid JSON matching the schema.
-
 `.trim();
+
+const buildPromptFromRequest = (req: MealPlanRequest): string => {
+  if ('macros' in req) {
+    const r = req.restrictions?.trim();
+    const restrictionsLine = r ? `Restrictions: ${r}` : 'Restrictions: none';
+
+    return [
+      'Daily targets:',
+      `- Calories: ${req.macros.calories}`,
+      `- Protein: ${req.macros.protein}g`,
+      `- Carbs: ${req.macros.carbs}g`,
+      `- Fat: ${req.macros.fats}g`,
+      restrictionsLine
+    ].join('\n');
+  }
+
+  return req.planText;
+};
 
 planRouter.post('/analyze', async (req, res) => {
   const requestId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-
-  req.on('aborted', () => console.log(`[PLAN:${requestId}] req_aborted`));
-  res.on('close', () => {
-    // Only useful if you want to see abnormal closes; remove if noisy
-    // finished=true generally means normal close after response
-    // console.log(`[PLAN:${requestId}] res_close finished=${res.writableEnded}`);
-  });
 
   const parsedReq = mealPlanRequestSchema.safeParse(req.body);
   if (!parsedReq.success) {
@@ -117,7 +152,7 @@ planRouter.post('/analyze', async (req, res) => {
     });
   }
 
-  const { planText } = parsedReq.data as MealPlanRequest;
+  const promptText = buildPromptFromRequest(parsedReq.data);
 
   try {
     const t0 = Date.now();
@@ -126,7 +161,7 @@ planRouter.post('/analyze', async (req, res) => {
       model: OPENAI_MODEL,
       input: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: planText }
+        { role: 'user', content: promptText }
       ],
       reasoning: { effort: 'minimal' },
       max_output_tokens: 2000,
@@ -138,7 +173,6 @@ planRouter.post('/analyze', async (req, res) => {
     const plan = response.output_parsed as MealPlanResponse | null;
 
     if (!plan) {
-      console.error(`[PLAN:${requestId}] parse_failed output_parsed is null`);
       res.setHeader('x-request-id', requestId);
       return res.status(502).json({
         error: 'AI returned an unexpected format. Please try again.',
