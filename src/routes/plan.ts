@@ -29,7 +29,7 @@ const mealPlanMacrosRequestSchema = z.object({
     carbs: z.number().int().min(0),
     fats: z.number().int().min(0)
   }),
-  restrictions: z
+  details: z
     .string()
     .optional()
     .transform((s) => (s ?? '').trim())
@@ -124,8 +124,8 @@ OUTPUT CONSTRAINTS (MUST FOLLOW):
 
 const buildPromptFromRequest = (req: MealPlanRequest): string => {
   if ('macros' in req) {
-    const r = req.restrictions?.trim();
-    const restrictionsLine = r ? `Restrictions: ${r}` : 'Restrictions: none';
+    const r = req.details?.trim();
+    const detailsLine = r ? `Details: ${r}` : 'Details: none';
 
     return [
       'Daily targets:',
@@ -133,7 +133,7 @@ const buildPromptFromRequest = (req: MealPlanRequest): string => {
       `- Protein: ${req.macros.protein}g`,
       `- Carbs: ${req.macros.carbs}g`,
       `- Fat: ${req.macros.fats}g`,
-      restrictionsLine
+      detailsLine
     ].join('\n');
   }
 
