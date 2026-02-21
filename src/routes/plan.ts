@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { zodTextFormat } from 'openai/helpers/zod';
 import { openai, OPENAI_MODEL } from '../config/openai';
+import { requireCognitoAuth } from '../middleware/requireCognitoAuth';
 
 export const planRouter = Router();
 
@@ -140,7 +141,7 @@ const buildPromptFromRequest = (req: MealPlanRequest): string => {
   return req.planText;
 };
 
-planRouter.post('/analyze', async (req, res) => {
+planRouter.post('/analyze', requireCognitoAuth, async (req, res) => {
   const requestId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 
   const parsedReq = mealPlanRequestSchema.safeParse(req.body);

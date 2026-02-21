@@ -4,7 +4,10 @@ import cors from 'cors';
 import helmet from 'helmet';
 
 import { planRouter } from './routes/plan';
+import { currentUserRouter } from './routes/currentUser';
 import { analyzeLimiter, analyzeFailsafe } from './middleware/analyzeRateLimit';
+import { connectMongo } from './config/db';
+import { getDb } from './config/db';
 
 const app = express();
 
@@ -56,6 +59,8 @@ app.use('/api/plan/analyze', analyzeLimiter, analyzeFailsafe);
 
 app.use('/api/plan', planRouter);
 
+app.use('/api', currentUserRouter);
+
 app.use((req, res) => {
   res.status(404).json({
     error: 'Route not found',
@@ -75,8 +80,17 @@ app.use(
     res.status(500).json({ error: 'Internal server error' });
   }
 );
-
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`Chapter Two backend listening on port ${PORT}`);
+
+async function start() {
+  await connectMongo();
+
+  app.listen(PORT, () => {
+    console.log(`Chapter Two backend listening on port ${PORT}`);
+  });
+}
+
+start().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });
