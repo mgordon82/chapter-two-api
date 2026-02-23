@@ -64,77 +64,92 @@ userProfileRouter.put(
 
     const db = getDb();
     const now = new Date();
-
     const userId = new ObjectId(String((req.user as any)._id));
 
     const userProfiles = db.collection('userProfiles');
     const nutritionSettings = db.collection('nutritionSettings');
 
-    await userProfiles.updateOne(
-      { userId },
-      {
-        $setOnInsert: {
-          userId,
-          createdAt: now
+    try {
+      await userProfiles.updateOne(
+        { userId },
+        {
+          $setOnInsert: {
+            userId,
+            createdAt: now
+          },
+          $set: {
+            role: (req.user as any).role ?? null,
+            firstName: body.profile.firstName,
+            lastName: body.profile.lastName,
+            gender: body.profile.gender,
+            age: body.profile.age,
+
+            heightCm: body.profile.heightCm,
+            weightKg: body.profile.weightKg,
+            goalWeightKg: body.profile.goalWeightKg,
+
+            activityLevel: body.profile.activityLevel,
+            goal: body.profile.goal,
+            rateLevel: body.profile.rateLevel,
+
+            preferences: {
+              measurementUnitPref: body.profile.preferences.measurementUnitPref,
+              weightUnitPref: body.profile.preferences.weightUnitPref
+            },
+
+            calculated: {
+              bmr: body.calculated.bmr,
+              tdee: body.calculated.tdee,
+              weightGoal: body.calculated.weightGoal
+            },
+
+            updatedAt: now
+          }
         },
-        $set: {
-          role: (req.user as any).role ?? null,
-          firstName: body.profile.firstName,
-          lastName: body.profile.lastName,
-          gender: body.profile.gender,
-          age: body.profile.age,
+        { upsert: true }
+      );
 
-          heightCm: body.profile.heightCm,
-          weightKg: body.profile.weightKg,
-          goalWeightKg: body.profile.goalWeightKg,
-
-          activityLevel: body.profile.activityLevel,
-          goal: body.profile.goal,
-          rateLevel: body.profile.rateLevel,
-
-          preferences: {
-            measurementUnitPref: body.profile.preferences.measurementUnitPref,
-            weightUnitPref: body.profile.preferences.weightUnitPref
+      await nutritionSettings.updateOne(
+        { userId },
+        {
+          $setOnInsert: {
+            userId,
+            details: '',
+            createdAt: now
           },
+          $set: {
+            targets: body.nutrition.targets,
 
-          calculated: {
-            bmr: body.calculated.bmr,
-            tdee: body.calculated.tdee,
-            weightGoal: body.calculated.weightGoal
-          },
-
-          updatedAt: now
-        }
-      },
-      { upsert: true }
-    );
-
-    await nutritionSettings.updateOne(
-      { userId },
-      {
-        $setOnInsert: {
-          userId,
-          details: '',
-          createdAt: now
+            preferences: {
+              allergies: [],
+              avoidFoods: [],
+              preferredFoods: [],
+              dietStyle: null,
+              mealsPerDay: 4
+            },
+            updatedByUserId: userId,
+            updatedAt: now
+          }
         },
-        $set: {
-          targets: body.nutrition.targets,
+        { upsert: true }
+      );
 
-          preferences: {
-            allergies: [],
-            avoidFoods: [],
-            preferredFoods: [],
-            dietStyle: null,
-            mealsPerDay: 4
-          },
-          updatedByUserId: userId,
-          updatedAt: now
-        }
-      },
-      { upsert: true }
-    );
+      return res.status(200).json({ ok: true });
+    } catch (err: any) {
+      if (err?.code === 121) {
+        console.error(
+          'Schema validation failed:',
+          JSON.stringify(err?.errInfo?.details, null, 2)
+        );
+        return res.status(400).json({
+          message: 'Schema validation failed',
+          details: err?.errInfo?.details
+        });
+      }
 
-    return res.status(200).json({ ok: true });
+      console.error('Unhandled error:', err);
+      return res.status(500).json({ message: 'Failed to save profile' });
+    }
   }
 );
 
