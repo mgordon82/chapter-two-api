@@ -5,20 +5,15 @@ import { getDb } from '../config/db';
 
 export const currentUserRouter = Router();
 
-/**
- * GET /api/current-user
- * - Requires Cognito access token
- * - Finds Mongo user (must exist)
- * - Returns basic profile for UI header + routing
- */
 currentUserRouter.get('/current-user', requireCognitoAuth, async (req, res) => {
   const claims = req.cognito;
   const sub = claims?.sub;
 
-  // email might not exist on access token depending on Cognito config
   const email =
     typeof claims?.email === 'string'
       ? claims.email.toLowerCase().trim()
+      : typeof claims?.username === 'string'
+      ? claims.username.toLowerCase().trim()
       : null;
 
   if (!sub) {
@@ -28,14 +23,11 @@ currentUserRouter.get('/current-user', requireCognitoAuth, async (req, res) => {
   const db = getDb();
   const users = db.collection('users');
 
-  // 1) Prefer stable Cognito sub mapping
   let user = await users.findOne({ 'auth.cognitoSub': sub });
 
-  // 2) Fallback to email for first-time linking (if available)
   if (!user && email) {
     user = await users.findOne({ email });
 
-    // If found, link auth.cognitoSub for future requests
     if (user && !(user as any).auth?.cognitoSub) {
       await users.updateOne(
         { _id: new ObjectId(String(user._id)) },
@@ -50,7 +42,6 @@ currentUserRouter.get('/current-user', requireCognitoAuth, async (req, res) => {
     }
   }
 
-  // Enforce: user must exist in Mongo
   if (!user) {
     return res
       .status(403)

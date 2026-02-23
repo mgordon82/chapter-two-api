@@ -125,3 +125,26 @@ usersRouter.post(
     }
   }
 );
+
+usersRouter.post(
+  '/activate',
+  requireCognitoAuth,
+  requireAppUser,
+  async (req, res) => {
+    try {
+      const db = getDb();
+      const users = db.collection('users');
+      const now = new Date();
+
+      await users.updateOne(
+        { 'auth.cognitoSub': req.cognito!.sub },
+        { $set: { status: 'active', updatedAt: now } }
+      );
+
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error('Activate error:', err);
+      return res.status(500).json({ message: 'Failed to activate user' });
+    }
+  }
+);
