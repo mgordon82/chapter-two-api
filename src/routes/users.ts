@@ -8,6 +8,7 @@ import { cognito } from '../config/cognito';
 import { getDb } from '../config/db';
 import { requireCognitoAuth } from '../middleware/requireCognitoAuth';
 import { requireAppUser } from '../middleware/requireAppUser';
+import { userProfileRouter } from './userProfile';
 
 export const usersRouter = Router();
 
@@ -148,3 +149,5 @@ usersRouter.post(
     }
   }
 );
+
+usersRouter.use('/current-user/profile', userProfileRouter);
