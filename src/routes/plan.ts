@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { zodTextFormat } from 'openai/helpers/zod';
 import { openai, OPENAI_MODEL } from '../config/openai';
 import { requireCognitoAuth } from '../middleware/requireCognitoAuth';
+import { requireAppUser } from '../middleware/requireAppUser';
 
 export const planRouter = Router();
 
@@ -141,60 +142,65 @@ const buildPromptFromRequest = (req: MealPlanRequest): string => {
   return req.planText;
 };
 
-planRouter.post('/analyze', requireCognitoAuth, async (req, res) => {
-  const requestId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+planRouter.post(
+  '/analyze',
+  requireCognitoAuth,
+  requireAppUser,
+  async (req, res) => {
+    const requestId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 
-  const parsedReq = mealPlanRequestSchema.safeParse(req.body);
-  if (!parsedReq.success) {
-    return res.status(400).json({
-      error: 'Invalid request body',
-      requestId,
-      details: parsedReq.error.flatten()
-    });
-  }
-
-  const promptText = buildPromptFromRequest(parsedReq.data);
-
-  try {
-    const t0 = Date.now();
-
-    const response = await openai.responses.parse({
-      model: OPENAI_MODEL,
-      input: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: promptText }
-      ],
-      reasoning: { effort: 'minimal' },
-      max_output_tokens: 2000,
-      text: {
-        format: zodTextFormat(mealPlanResponseSchema, 'ChapterTwoMealPlan')
-      }
-    });
-
-    const plan = response.output_parsed as MealPlanResponse | null;
-
-    if (!plan) {
-      res.setHeader('x-request-id', requestId);
-      return res.status(502).json({
-        error: 'AI returned an unexpected format. Please try again.',
-        requestId
+    const parsedReq = mealPlanRequestSchema.safeParse(req.body);
+    if (!parsedReq.success) {
+      return res.status(400).json({
+        error: 'Invalid request body',
+        requestId,
+        details: parsedReq.error.flatten()
       });
     }
 
-    console.log(
-      `[PLAN:${requestId}] ok openai_ms=${Date.now() - t0} meals=${
-        plan.meals.length
-      } targets=${plan.dailyTargets.calories}kcal`
-    );
+    const promptText = buildPromptFromRequest(parsedReq.data);
 
-    res.setHeader('x-request-id', requestId);
-    return res.json(plan);
-  } catch (err: any) {
-    console.error(`[PLAN:${requestId}] error=`, err?.response ?? err);
-    res.setHeader('x-request-id', requestId);
-    return res.status(500).json({
-      error: 'Failed to generate meal plan at this time.',
-      requestId
-    });
+    try {
+      const t0 = Date.now();
+
+      const response = await openai.responses.parse({
+        model: OPENAI_MODEL,
+        input: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: promptText }
+        ],
+        reasoning: { effort: 'minimal' },
+        max_output_tokens: 2000,
+        text: {
+          format: zodTextFormat(mealPlanResponseSchema, 'ChapterTwoMealPlan')
+        }
+      });
+
+      const plan = response.output_parsed as MealPlanResponse | null;
+
+      if (!plan) {
+        res.setHeader('x-request-id', requestId);
+        return res.status(502).json({
+          error: 'AI returned an unexpected format. Please try again.',
+          requestId
+        });
+      }
+
+      console.log(
+        `[PLAN:${requestId}] ok openai_ms=${Date.now() - t0} meals=${
+          plan.meals.length
+        } targets=${plan.dailyTargets.calories}kcal`
+      );
+
+      res.setHeader('x-request-id', requestId);
+      return res.json(plan);
+    } catch (err: any) {
+      console.error(`[PLAN:${requestId}] error=`, err?.response ?? err);
+      res.setHeader('x-request-id', requestId);
+      return res.status(500).json({
+        error: 'Failed to generate meal plan at this time.',
+        requestId
+      });
+    }
   }
-});
+);
