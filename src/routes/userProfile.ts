@@ -183,9 +183,9 @@ userProfileRouter.get(
         rateLevel: (profileDoc as any)?.rateLevel ?? null,
         preferences: {
           measurementUnitPref:
-            (profileDoc as any)?.preferences?.measurementUnitPref ?? 'ft',
+            (profileDoc as any)?.preferences?.measurementUnitPref ?? 'cm',
           weightUnitPref:
-            (profileDoc as any)?.preferences?.weightUnitPref ?? 'lbs'
+            (profileDoc as any)?.preferences?.weightUnitPref ?? 'kg'
         }
       },
       calculated: {
