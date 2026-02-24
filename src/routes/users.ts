@@ -9,6 +9,7 @@ import { getDb } from '../config/db';
 import { requireCognitoAuth } from '../middleware/requireCognitoAuth';
 import { requireAppUser } from '../middleware/requireAppUser';
 import { userProfileRouter } from './userProfile';
+import { requireRole } from '../middleware/requireRole';
 
 export const usersRouter = Router();
 
@@ -32,6 +33,7 @@ usersRouter.post(
   '/invite',
   requireCognitoAuth,
   requireAppUser,
+  requireRole(['admin', 'staff', 'coach']),
   async (req, res) => {
     const parsed = inviteSchema.safeParse(req.body);
     if (!parsed.success) {
