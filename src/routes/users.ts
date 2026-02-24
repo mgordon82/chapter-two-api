@@ -17,7 +17,7 @@ const inviteSchema = z.object({
     .string()
     .email()
     .transform((s) => s.toLowerCase().trim()),
-  role: z.enum(['client', 'coach']).default('client'),
+  role: z.enum(['client', 'coach', 'admin', 'staff']).default('client'),
   displayName: z.string().min(1).max(80).optional()
 });
 
