@@ -5,11 +5,24 @@ import { getDb } from '../config/db';
 
 export const currentUserRouter = Router();
 
+function safeTrim(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function nameFromParts(first: unknown, last: unknown): string | null {
+  const f = safeTrim(first);
+  const l = safeTrim(last);
+  const combined = [f, l].filter(Boolean).join(' ');
+  return combined.length > 0 ? combined : null;
+}
+
 currentUserRouter.get('/current-user', requireCognitoAuth, async (req, res) => {
   const claims = req.cognito;
   const sub = claims?.sub;
 
-  const email =
+  const emailFromClaims =
     typeof claims?.email === 'string'
       ? claims.email.toLowerCase().trim()
       : typeof claims?.username === 'string'
@@ -22,15 +35,16 @@ currentUserRouter.get('/current-user', requireCognitoAuth, async (req, res) => {
 
   const db = getDb();
   const users = db.collection('users');
+  const userProfiles = db.collection('userProfiles');
 
   let user = await users.findOne({ 'auth.cognitoSub': sub });
 
-  if (!user && email) {
-    user = await users.findOne({ email });
+  if (!user && emailFromClaims) {
+    user = await users.findOne({ email: emailFromClaims });
 
     if (user && !(user as any).auth?.cognitoSub) {
       await users.updateOne(
-        { _id: new ObjectId(String(user._id)) },
+        { _id: new ObjectId(String((user as any)._id)) },
         {
           $set: {
             'auth.cognitoSub': sub,
@@ -48,10 +62,27 @@ currentUserRouter.get('/current-user', requireCognitoAuth, async (req, res) => {
       .json({ message: 'No access (user not provisioned)' });
   }
 
+  const userId = new ObjectId(String((user as any)._id));
+  const profileDoc = await userProfiles.findOne({ userId });
+
+  const displayNameFromProfile = nameFromParts(
+    (profileDoc as any)?.firstName,
+    (profileDoc as any)?.lastName
+  );
+
+  // Prefer any explicit displayName if you ever add it back later
+  const displayNameFromUser = safeTrim((user as any)?.displayName);
+
+  // ✅ Full email fallback (NOT email prefix)
+  const fullEmail = safeTrim((user as any)?.email) ?? emailFromClaims;
+
+  const computedDisplayName =
+    displayNameFromUser ?? displayNameFromProfile ?? fullEmail;
+
   return res.json({
-    id: String(user._id),
-    email: (user as any).email ?? null,
-    displayName: (user as any).displayName ?? null,
+    id: String((user as any)._id),
+    email: (user as any).email ?? emailFromClaims ?? null,
+    displayName: computedDisplayName,
     role: (user as any).role ?? null,
     status: (user as any).status ?? null
   });
