@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { zodTextFormat } from 'openai/helpers/zod';
-import { openai, OPENAI_MODEL } from '../config/openai';
+import { openai, OPENAI_MODEL_MINI } from '../config/openai';
 import { requireCognitoAuth } from '../middleware/requireCognitoAuth';
 import { requireAppUser } from '../middleware/requireAppUser';
 
@@ -164,7 +164,7 @@ planRouter.post(
       const t0 = Date.now();
 
       const response = await openai.responses.parse({
-        model: OPENAI_MODEL,
+        model: OPENAI_MODEL_MINI,
         input: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: promptText }

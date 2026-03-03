@@ -8,4 +8,11 @@ export const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-export const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+export const OPENAI_MODEL_FULL =
+  process.env.OPENAI_MODEL_FULL || 'gpt-4.1-mini';
+
+export const OPENAI_MODEL_MINI =
+  process.env.OPENAI_MODEL_MINI || 'gpt-4.1-mini';
+
+export const OPENAI_MODEL_NANO =
+  process.env.OPENAI_MODEL_NANO || 'gpt-4.1-mini';
