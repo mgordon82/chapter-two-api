@@ -35,7 +35,7 @@ type TrendOption = {
   summary: string;
 };
 
-type TrendAnalyzeResponse = {
+type TrendMetricsResponse = {
   requestId: string;
   range: RangeKey;
   status: TrendStatus;
@@ -52,8 +52,10 @@ type TrendAnalyzeResponse = {
     avgChangePerWeekKg: number | null;
     avgChangePerWeekPct: number | null;
   };
+};
+
+type DeterministicTrendAnalysis = Omit<TrendMetricsResponse, 'requestId'> & {
   options: TrendOption[];
-  ai?: TrendAiResponse;
 };
 
 function daysForRange(range: RangeKey): number {
@@ -85,11 +87,12 @@ function mean(nums: number[]): number | null {
 }
 
 function isoDayKey(d: Date) {
-  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+  return d.toISOString().slice(0, 10);
 }
 
 function dedupeLatestPerDay(rows: CheckInRow[]): CheckInRow[] {
   const map = new Map<string, CheckInRow>();
+
   for (const r of rows) {
     const key = isoDayKey(r.recordedAt);
     const existing = map.get(key);
@@ -97,6 +100,7 @@ function dedupeLatestPerDay(rows: CheckInRow[]): CheckInRow[] {
       map.set(key, r);
     }
   }
+
   return Array.from(map.values()).sort(
     (a, b) => a.recordedAt.getTime() - b.recordedAt.getTime()
   );
@@ -104,8 +108,8 @@ function dedupeLatestPerDay(rows: CheckInRow[]): CheckInRow[] {
 
 function computeRolling7dAverages(rows: CheckInRow[], anchorDateUtc: Date) {
   const anchorStart = startOfDayUTC(anchorDateUtc);
-  const last7Start = new Date(anchorStart.getTime() - 6 * MS_PER_DAY); // inclusive 7 days
-  const prev7End = new Date(last7Start.getTime() - 1); // just before last7Start
+  const last7Start = new Date(anchorStart.getTime() - 6 * MS_PER_DAY);
+  const prev7End = new Date(last7Start.getTime() - 1);
   const prev7Start = new Date(
     startOfDayUTC(new Date(prev7End)).getTime() - 6 * MS_PER_DAY
   );
@@ -155,10 +159,158 @@ function confidenceFromSampleSize(
   return 'high';
 }
 
+function buildTrendOptions(
+  status: TrendStatus,
+  avgChangePerWeekKg: number | null
+): TrendOption[] {
+  if (status === 'insufficient_data') {
+    return [
+      {
+        id: 'add_checkins',
+        kind: 'hold',
+        title: 'Add more check-ins',
+        summary: 'Log 4–7 weigh-ins/week to unlock reliable trend analysis.'
+      },
+      {
+        id: 'hold',
+        kind: 'hold',
+        title: 'Hold current plan',
+        summary:
+          'Keep your plan steady while you collect more consistent weigh-in data.'
+      }
+    ];
+  }
+
+  if (avgChangePerWeekKg == null) {
+    return [
+      {
+        id: 'hold',
+        kind: 'hold',
+        title: 'Hold current plan',
+        summary: 'Keep your plan steady and reassess after 7–10 more check-ins.'
+      }
+    ];
+  }
+
+  // Losing too fast
+  if (avgChangePerWeekKg < -0.75) {
+    return [
+      {
+        id: 'hold',
+        kind: 'hold',
+        title: 'Hold current plan',
+        summary:
+          'Your trend is moving down quickly — avoid making the plan more aggressive right now.'
+      },
+      {
+        id: 'macro_tweak_recover',
+        kind: 'macro_tweak',
+        title: 'Slight calorie increase',
+        summary:
+          'If energy, hunger, or recovery feel rough, increase intake slightly for 7–10 days.'
+      },
+      {
+        id: 'activity_hold',
+        kind: 'hold',
+        title: 'Do not add more activity yet',
+        summary:
+          'Keep activity steady until the trend settles into a more sustainable pace.'
+      }
+    ];
+  }
+
+  // Solid downward trend
+  if (avgChangePerWeekKg < -0.25) {
+    return [
+      {
+        id: 'hold',
+        kind: 'hold',
+        title: 'Hold current plan',
+        summary:
+          'Your trend is moving in the right direction — keep your current approach steady.'
+      },
+      {
+        id: 'activity_bump_2k',
+        kind: 'activity_bump',
+        title: 'Optional activity bump',
+        summary:
+          'Only if energy is good, add ~2,000 steps/day as a short experiment.'
+      }
+    ];
+  }
+
+  // Plateau / nearly flat
+  if (Math.abs(avgChangePerWeekKg) < 0.05) {
+    return [
+      {
+        id: 'activity_bump_2k',
+        kind: 'activity_bump',
+        title: 'Activity bump (10-day experiment)',
+        summary: 'Add ~2,000 steps/day average for 10 days and reassess.'
+      },
+      {
+        id: 'macro_tweak_small',
+        kind: 'macro_tweak',
+        title: 'Small calorie adjustment',
+        summary: 'Reduce daily intake by ~150 calories for 10–14 days.'
+      },
+      {
+        id: 'hold',
+        kind: 'hold',
+        title: 'Hold steady a bit longer',
+        summary:
+          'If consistency has been uneven, stay steady for another week before adjusting.'
+      }
+    ];
+  }
+
+  // Gaining
+  if (avgChangePerWeekKg > 0.15) {
+    return [
+      {
+        id: 'activity_bump_2k',
+        kind: 'activity_bump',
+        title: 'Increase activity slightly',
+        summary: 'Add ~2,000 steps/day and reassess trend after 10 days.'
+      },
+      {
+        id: 'macro_tweak_small',
+        kind: 'macro_tweak',
+        title: 'Small calorie adjustment',
+        summary: 'Reduce daily intake by ~150 calories for the next 10–14 days.'
+      },
+      {
+        id: 'hold',
+        kind: 'hold',
+        title: 'Audit consistency first',
+        summary:
+          'Before making a bigger change, tighten tracking and weigh-in consistency for one week.'
+      }
+    ];
+  }
+
+  // Mild downward trend / basically fine
+  return [
+    {
+      id: 'hold',
+      kind: 'hold',
+      title: 'Hold current plan',
+      summary: 'Your trend looks stable — continue and reassess next week.'
+    },
+    {
+      id: 'activity_bump_2k',
+      kind: 'activity_bump',
+      title: 'Small activity boost',
+      summary:
+        'If progress feels slower than expected, add ~2,000 steps/day for 7–10 days.'
+    }
+  ];
+}
+
 async function analyzeTrendForUser(
   userObjectId: ObjectId,
   range: RangeKey
-): Promise<Omit<TrendAnalyzeResponse, 'requestId' | 'ai'>> {
+): Promise<DeterministicTrendAnalysis> {
   const db = getDb();
   const checkIns = db.collection('checkIns');
 
@@ -187,9 +339,11 @@ async function analyzeTrendForUser(
   const latest = rows.length ? rows[rows.length - 1] : null;
 
   if (!latest) {
+    const status: TrendStatus = 'insufficient_data';
+
     return {
       range,
-      status: 'insufficient_data',
+      status,
       confidence: 'low',
       series: [],
       windows: null,
@@ -200,15 +354,7 @@ async function analyzeTrendForUser(
         avgChangePerWeekKg: null,
         avgChangePerWeekPct: null
       },
-      options: [
-        {
-          id: 'add_checkins',
-          kind: 'hold',
-          title: 'Add more check-ins',
-          summary:
-            'Log at least 7–14 days of weigh-ins to enable trend analysis.'
-        }
-      ]
+      options: buildTrendOptions(status, null)
     };
   }
 
@@ -223,22 +369,6 @@ async function analyzeTrendForUser(
     rolling.windows.last7.n,
     rolling.windows.prev7.n
   );
-
-  const options: TrendOption[] = [
-    {
-      id: 'hold',
-      kind: 'hold',
-      title: 'Hold current plan',
-      summary:
-        'Keep your plan steady and reassess after 7–10 more consistent check-ins.'
-    },
-    {
-      id: 'activity_bump_2k',
-      kind: 'activity_bump',
-      title: 'Activity bump (10-day experiment)',
-      summary: 'Add ~2,000 steps/day average for 10 days and reassess.'
-    }
-  ];
 
   return {
     range,
@@ -279,13 +409,10 @@ async function analyzeTrendForUser(
           ? Number(rolling.avgChangePerWeekPct.toFixed(3))
           : null
     },
-    options
+    options: buildTrendOptions(status, rolling.avgChangePerWeekKg)
   };
 }
 
-/**
- * Structured Outputs: all fields required; use nullable() for optional values.
- */
 const trendAiResponseSchema = z.object({
   quickRead: z.string().max(140),
   context: z.string().max(200).nullable(),
@@ -304,6 +431,15 @@ const trendAiResponseSchema = z.object({
 });
 
 type TrendAiResponse = z.infer<typeof trendAiResponseSchema>;
+
+type TrendInsightResponse = {
+  requestId: string;
+  range: RangeKey;
+  status: TrendStatus;
+  confidence: TrendConfidence;
+  options: TrendOption[];
+  ai: TrendAiResponse | null;
+};
 
 const trendAiSystemPrompt = `
 You are a fitness coaching assistant.
@@ -328,8 +464,8 @@ async function getAiRecommendations(input: {
   range: RangeKey;
   status: TrendStatus;
   confidence: TrendConfidence;
-  windows: TrendAnalyzeResponse['windows'];
-  metrics: TrendAnalyzeResponse['metrics'];
+  windows: TrendMetricsResponse['windows'];
+  metrics: TrendMetricsResponse['metrics'];
   options: TrendOption[];
 }): Promise<TrendAiResponse> {
   const allowedIds = input.options.map((o) => o.id);
@@ -351,7 +487,6 @@ async function getAiRecommendations(input: {
         })
       }
     ],
-    // ✅ FIX: gpt-5.1 supports: none | low | medium | high
     reasoning: { effort: 'low' },
     max_output_tokens: 450,
     text: { format: zodTextFormat(trendAiResponseSchema, 'TrendAI') }
@@ -389,41 +524,117 @@ async function getAiRecommendations(input: {
   return { ...out, recommended: filtered.slice(0, 3) };
 }
 
+function getRequestId() {
+  return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+}
+
+function getUserObjectId(req: any): ObjectId {
+  const userId = req.user?._id as ObjectId | string | undefined;
+  if (!userId) {
+    throw new Error('MISSING_USER');
+  }
+  return typeof userId === 'string' ? new ObjectId(userId) : userId;
+}
+
 trendAnalysisRouter.post(
-  '/analyze',
+  '/metrics',
   requireCognitoAuth,
   requireAppUser,
-  async (req, res) => {
-    const requestId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+  async (req, res): Promise<void> => {
+    const requestId = getRequestId();
     res.setHeader('x-request-id', requestId);
 
     try {
       const parsed = analyzeReqSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
-        return res.status(400).json({
+        res.status(400).json({
           error: 'Invalid request body',
           requestId,
           details: parsed.error.flatten()
         });
+        return;
       }
 
-      const range = parsed.data.range;
-
-      const userId = (req as any).user?._id as ObjectId | string | undefined;
-      if (!userId) {
-        return res
-          .status(500)
-          .json({ error: 'Missing user on request', requestId });
+      let userObjectId: ObjectId;
+      try {
+        userObjectId = getUserObjectId(req);
+      } catch {
+        res.status(500).json({
+          error: 'Missing user on request',
+          requestId
+        });
+        return;
       }
 
-      const userObjectId =
-        typeof userId === 'string' ? new ObjectId(userId) : userId;
+      const analysis = await analyzeTrendForUser(
+        userObjectId,
+        parsed.data.range
+      );
 
-      // 1) deterministic
-      const analysis = await analyzeTrendForUser(userObjectId, range);
+      const response: TrendMetricsResponse = {
+        requestId,
+        range: analysis.range,
+        status: analysis.status,
+        confidence: analysis.confidence,
+        series: analysis.series,
+        windows: analysis.windows,
+        metrics: analysis.metrics
+      };
 
-      // 2) AI (fail-soft)
-      let ai: TrendAiResponse | undefined;
+      res.json(response);
+      return;
+    } catch (err: any) {
+      console.error('[TREND_METRICS] error', {
+        requestId,
+        message: err?.message,
+        stack: err?.stack
+      });
+
+      res.status(500).json({
+        error: 'Trend metrics failed',
+        requestId
+      });
+      return;
+    }
+  }
+);
+
+trendAnalysisRouter.post(
+  '/insight',
+  requireCognitoAuth,
+  requireAppUser,
+  async (req, res): Promise<void> => {
+    const requestId = getRequestId();
+    res.setHeader('x-request-id', requestId);
+
+    try {
+      const parsed = analyzeReqSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'Invalid request body',
+          requestId,
+          details: parsed.error.flatten()
+        });
+        return;
+      }
+
+      let userObjectId: ObjectId;
+      try {
+        userObjectId = getUserObjectId(req);
+      } catch {
+        res.status(500).json({
+          error: 'Missing user on request',
+          requestId
+        });
+        return;
+      }
+
+      const analysis = await analyzeTrendForUser(
+        userObjectId,
+        parsed.data.range
+      );
+
+      let ai: TrendAiResponse | null = null;
       try {
         ai = await getAiRecommendations({
           range: analysis.range,
@@ -434,28 +645,37 @@ trendAnalysisRouter.post(
           options: analysis.options
         });
       } catch (err: any) {
-        console.error('[TREND_AI] failed', {
+        console.error('[TREND_INSIGHT_AI] failed', {
           requestId,
           message: err?.message,
           stack: err?.stack
         });
-        ai = undefined;
+        ai = null;
       }
 
-      const response: TrendAnalyzeResponse = {
+      const response: TrendInsightResponse = {
         requestId,
-        ...analysis,
-        ...(ai ? { ai } : {})
+        range: analysis.range,
+        status: analysis.status,
+        confidence: analysis.confidence,
+        options: analysis.options,
+        ai
       };
 
-      return res.json(response);
+      res.json(response);
+      return;
     } catch (err: any) {
-      console.error('[TREND] error', {
+      console.error('[TREND_INSIGHT] error', {
         requestId,
         message: err?.message,
         stack: err?.stack
       });
-      return res.status(500).json({ error: 'Trend analyze failed', requestId });
+
+      res.status(500).json({
+        error: 'Trend insight failed',
+        requestId
+      });
+      return;
     }
   }
 );
