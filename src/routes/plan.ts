@@ -186,11 +186,13 @@ planRouter.post(
         });
       }
 
-      console.log(
-        `[PLAN:${requestId}] ok openai_ms=${Date.now() - t0} meals=${
-          plan.meals.length
-        } targets=${plan.dailyTargets.calories}kcal`
-      );
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(
+          `[PLAN:${requestId}] ok openai_ms=${Date.now() - t0} meals=${
+            plan.meals.length
+          } targets=${plan.dailyTargets.calories}kcal`
+        );
+      }
 
       res.setHeader('x-request-id', requestId);
       return res.json(plan);

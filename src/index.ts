@@ -10,6 +10,7 @@ import { connectMongo } from './config/db';
 import { usersRouter } from './routes/users';
 import { checkInsRouter } from './routes/userCheckins';
 import { trendAnalysisRouter } from './routes/trendAnalysis';
+import { photosRouter } from './routes/photos';
 
 const app = express();
 
@@ -65,6 +66,7 @@ app.use('/api', currentUserRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/check-ins', checkInsRouter);
 app.use('/api/trend', trendAnalysisRouter);
+app.use('/api/photos', photosRouter);
 
 app.use((req, res) => {
   res.status(404).json({

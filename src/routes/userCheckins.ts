@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ObjectId } from 'mongodb';
 import { requireCognitoAuth } from '../middleware/requireCognitoAuth';
 import { getDb } from '../config/db';
+import { createSignedPhotoViewUrl } from '../utils/r2Uploads';
 
 export const checkInsRouter = Router();
 
@@ -24,11 +25,47 @@ checkInsRouter.get('/current-user', requireCognitoAuth, async (req, res) => {
       Math.max(1, Number.isFinite(Number(limitRaw)) ? Number(limitRaw) : 50)
     );
 
-    const items = await checkIns
+    const rawItems = await checkIns
       .find({ userId: actor._id, isDeleted: false })
       .sort({ recordedAt: -1 })
       .limit(limit)
       .toArray();
+
+    const items = await Promise.all(
+      rawItems.map(async (item) => {
+        if (!item?.hasPhotos || !item?.photos?.photos?.length) {
+          return item;
+        }
+
+        const photosWithViewUrls = await Promise.all(
+          item.photos.photos.map(async (photo: any) => {
+            const viewUrl = await createSignedPhotoViewUrl({
+              storageKey: photo.storageKey
+            });
+
+            return {
+              position: photo.position,
+              storageKey: photo.storageKey,
+              mimeType: photo.mimeType,
+              originalFileName: photo.originalFileName ?? null,
+              sizeBytes: photo.sizeBytes ?? null,
+              uploadedAt:
+                photo.uploadedAt instanceof Date
+                  ? photo.uploadedAt.toISOString()
+                  : photo.uploadedAt,
+              viewUrl
+            };
+          })
+        );
+
+        return {
+          ...item,
+          photos: {
+            photos: photosWithViewUrls
+          }
+        };
+      })
+    );
 
     return res.json({ ok: true, items });
   } catch (err) {
