@@ -279,15 +279,16 @@ photosRouter.post(
   '/progress/upload-session',
   requireCognitoAuth,
   async (req, res) => {
+    const sub = req.cognito?.sub;
+
     try {
-      const sub = req.cognito?.sub;
       if (!sub) {
         return res.status(401).json({ message: 'Missing Cognito sub' });
       }
 
       const db = getDb();
       const users = db.collection('users');
-      const checkIns = db.collection('checkIns');
+      const photoSets = db.collection('photoSets');
 
       const actor = await users.findOne({ 'auth.cognitoSub': sub });
       if (!actor) {
@@ -296,27 +297,7 @@ photosRouter.post(
           .json({ message: 'User not found for this token' });
       }
 
-      const { checkInId, photos } = req.body ?? {};
-
-      if (
-        !checkInId ||
-        typeof checkInId !== 'string' ||
-        !ObjectId.isValid(checkInId)
-      ) {
-        return res
-          .status(400)
-          .json({ message: 'checkInId must be a valid ObjectId string' });
-      }
-
-      const checkIn = await checkIns.findOne({
-        _id: new ObjectId(checkInId),
-        userId: actor._id,
-        isDeleted: false
-      });
-
-      if (!checkIn) {
-        return res.status(404).json({ message: 'Check-in not found' });
-      }
+      const { photos } = req.body ?? {};
 
       const validation = validateRequestedPhotoUploads(photos, {
         requireFront: true,
@@ -324,14 +305,30 @@ photosRouter.post(
       });
 
       if (!validation.ok) {
+        console.warn('[photos/progress/upload-session] validation failed', {
+          sub,
+          userId: actor._id.toString(),
+          message: validation.message
+        });
+
         return res.status(400).json({ message: validation.message });
       }
+
+      const photoSetId = new ObjectId();
+
+      console.info('[photos/progress/upload-session] start', {
+        sub,
+        userId: actor._id.toString(),
+        photoSetId: photoSetId.toString(),
+        photoCount: validation.photos.length,
+        positions: validation.photos.map((photo) => photo.position)
+      });
 
       const uploads = await Promise.all(
         validation.photos.map(async (photo) => {
           const storageKey = buildProgressPhotoStorageKey({
             userId: actor._id.toString(),
-            checkInId,
+            photoSetId: photoSetId.toString(),
             position: photo.position,
             mimeType: photo.mimeType
           });
@@ -352,13 +349,42 @@ photosRouter.post(
         })
       );
 
+      const now = new Date();
+
+      await photoSets.insertOne({
+        _id: photoSetId,
+        userId: actor._id,
+        checkInId: null,
+        type: 'progress',
+        status: 'pending',
+        photos: [],
+        createdAt: now,
+        finalizedAt: null,
+        attachedAt: null,
+        createdByUserId: actor._id,
+        updatedAt: null,
+        isDeleted: false
+      });
+
+      console.info('[photos/progress/upload-session] success', {
+        sub,
+        userId: actor._id.toString(),
+        photoSetId: photoSetId.toString(),
+        photoCount: uploads.length
+      });
+
       return res.status(201).json({
         ok: true,
-        checkInId,
+        photoSetId: photoSetId.toString(),
         uploads
       });
     } catch (err) {
-      console.error('[photos/progress/upload-session] failed:', err);
+      console.error('[photos/progress/upload-session] failed', {
+        sub: sub ?? null,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined
+      });
+
       return res.status(500).json({
         message: 'Failed to create progress upload session'
       });
@@ -370,15 +396,16 @@ photosRouter.post(
   '/progress/finalize',
   requireCognitoAuth,
   async (req, res) => {
+    const sub = req.cognito?.sub;
+
     try {
-      const sub = req.cognito?.sub;
       if (!sub) {
         return res.status(401).json({ message: 'Missing Cognito sub' });
       }
 
       const db = getDb();
       const users = db.collection('users');
-      const checkIns = db.collection('checkIns');
+      const photoSets = db.collection('photoSets');
 
       const actor = await users.findOne({ 'auth.cognitoSub': sub });
       if (!actor) {
@@ -387,16 +414,16 @@ photosRouter.post(
           .json({ message: 'User not found for this token' });
       }
 
-      const { checkInId, photos } = req.body ?? {};
+      const { photoSetId, photos } = req.body ?? {};
 
       if (
-        !checkInId ||
-        typeof checkInId !== 'string' ||
-        !ObjectId.isValid(checkInId)
+        !photoSetId ||
+        typeof photoSetId !== 'string' ||
+        !ObjectId.isValid(photoSetId)
       ) {
         return res
           .status(400)
-          .json({ message: 'checkInId must be a valid ObjectId string' });
+          .json({ message: 'photoSetId must be a valid ObjectId string' });
       }
 
       const validation = validateRequestedPhotoUploads(photos, {
@@ -405,14 +432,49 @@ photosRouter.post(
       });
 
       if (!validation.ok) {
+        console.warn('[photos/progress/finalize] validation failed', {
+          sub,
+          userId: actor._id.toString(),
+          photoSetId,
+          message: validation.message
+        });
+
         return res.status(400).json({ message: validation.message });
       }
+
+      const existingPhotoSet = await photoSets.findOne({
+        _id: new ObjectId(photoSetId),
+        userId: actor._id,
+        type: 'progress',
+        isDeleted: false
+      });
+
+      if (!existingPhotoSet) {
+        return res
+          .status(404)
+          .json({ message: 'Progress photo set not found' });
+      }
+
+      if (existingPhotoSet.status === 'attached') {
+        return res.status(409).json({
+          message: 'Progress photo set has already been attached to a check-in'
+        });
+      }
+
+      console.info('[photos/progress/finalize] start', {
+        sub,
+        userId: actor._id.toString(),
+        photoSetId,
+        currentStatus: existingPhotoSet.status,
+        photoCount: validation.photos.length,
+        positions: validation.photos.map((photo) => photo.position)
+      });
 
       const finalizedPhotos = validation.photos.map((photo) => ({
         position: photo.position,
         storageKey: buildProgressPhotoStorageKey({
           userId: actor._id.toString(),
-          checkInId,
+          photoSetId,
           position: photo.position,
           mimeType: photo.mimeType
         }),
@@ -424,30 +486,33 @@ photosRouter.post(
 
       const now = new Date();
 
-      const result = await checkIns.updateOne(
+      await photoSets.updateOne(
         {
-          _id: new ObjectId(checkInId),
+          _id: new ObjectId(photoSetId),
           userId: actor._id,
+          type: 'progress',
           isDeleted: false
         },
         {
           $set: {
-            hasPhotos: true,
-            photos: {
-              photos: finalizedPhotos
-            },
+            status: 'finalized',
+            photos: finalizedPhotos,
+            finalizedAt: now,
             updatedAt: now
           }
         }
       );
 
-      if (result.matchedCount === 0) {
-        return res.status(404).json({ message: 'Check-in not found' });
-      }
+      console.info('[photos/progress/finalize] success', {
+        sub,
+        userId: actor._id.toString(),
+        photoSetId,
+        photoCount: finalizedPhotos.length
+      });
 
       return res.status(201).json({
         ok: true,
-        checkInId,
+        photoSetId,
         photos: finalizedPhotos.map((photo) => ({
           position: photo.position,
           storageKey: photo.storageKey,
@@ -458,7 +523,14 @@ photosRouter.post(
         }))
       });
     } catch (err) {
-      console.error('[photos/progress/finalize] failed:', err);
+      console.error('[photos/progress/finalize] failed', {
+        sub: sub ?? null,
+        photoSetId:
+          typeof req.body?.photoSetId === 'string' ? req.body.photoSetId : null,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined
+      });
+
       return res.status(500).json({
         message: 'Failed to finalize progress photos'
       });

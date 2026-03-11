@@ -174,11 +174,11 @@ export async function createSignedPhotoViewUrl(params: {
 
 export function buildProgressPhotoStorageKey(params: {
   userId: string;
-  checkInId: string;
+  photoSetId: string;
   position: PhotoPosition;
   mimeType: string;
 }) {
   const ext = getPhotoExtensionFromMimeType(params.mimeType);
 
-  return `users/${params.userId}/photos/progress/${params.checkInId}/${params.position}.${ext}`;
+  return `users/${params.userId}/photos/progress/${params.photoSetId}/${params.position}.${ext}`;
 }
