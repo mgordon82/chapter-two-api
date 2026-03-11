@@ -331,3 +331,43 @@ checkInsRouter.delete(
     }
   }
 );
+
+checkInsRouter.post(
+  '/current-user/import/apple-health/weight',
+  requireCognitoAuth,
+  async (req, res) => {
+    try {
+      const sub = req.cognito?.sub;
+
+      if (!sub) {
+        return res.status(401).json({ message: 'Missing Cognito sub' });
+      }
+
+      const db = getDb();
+      const users = db.collection('users');
+
+      const actor = await users.findOne({ 'auth.cognitoSub': sub });
+
+      if (!actor) {
+        return res
+          .status(401)
+          .json({ message: 'User not found for this token' });
+      }
+
+      console.info('[apple-health-weight-import]', {
+        userId: actor._id.toString(),
+        payload: req.body
+      });
+
+      return res.json({
+        ok: true
+      });
+    } catch (err) {
+      console.error('[apple-health-weight-import] failed', err);
+
+      return res.status(500).json({
+        message: 'Import route failed'
+      });
+    }
+  }
+);
