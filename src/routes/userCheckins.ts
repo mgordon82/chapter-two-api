@@ -336,37 +336,153 @@ checkInsRouter.post(
   '/current-user/import/apple-health/weight',
   requireCognitoAuth,
   async (req, res) => {
-    try {
-      const sub = req.cognito?.sub;
+    const sub = req.cognito?.sub;
 
+    try {
       if (!sub) {
         return res.status(401).json({ message: 'Missing Cognito sub' });
       }
 
       const db = getDb();
       const users = db.collection('users');
+      const checkIns = db.collection('checkIns');
+      const userProfiles = db.collection('userProfiles');
 
       const actor = await users.findOne({ 'auth.cognitoSub': sub });
-
       if (!actor) {
         return res
           .status(401)
           .json({ message: 'User not found for this token' });
       }
 
-      console.info('[apple-health-weight-import]', {
-        userId: actor._id.toString(),
-        payload: req.body
+      const { externalSampleId, recordedAt, metrics, source } = req.body ?? {};
+
+      if (
+        typeof externalSampleId !== 'string' ||
+        externalSampleId.trim().length === 0
+      ) {
+        return res.status(400).json({
+          message: 'externalSampleId is required'
+        });
+      }
+
+      const rAt = new Date(recordedAt);
+      if (!recordedAt || Number.isNaN(rAt.getTime())) {
+        return res.status(400).json({
+          message: 'recordedAt must be a valid ISO date string'
+        });
+      }
+
+      const weightKg = Number(metrics?.weightKg);
+      if (!Number.isFinite(weightKg) || weightKg < 20 || weightKg > 300) {
+        return res.status(400).json({
+          message: 'metrics.weightKg must be a number between 20 and 300'
+        });
+      }
+
+      const appSourceName =
+        typeof source?.appSourceName === 'string' ? source.appSourceName : null;
+
+      const deviceSourceName =
+        typeof source?.deviceSourceName === 'string'
+          ? source.deviceSourceName
+          : null;
+
+      const existingImported = await checkIns.findOne({
+        userId: actor._id,
+        isDeleted: false,
+        'source.type': 'apple_health',
+        'source.integration': 'apple_health',
+        'source.externalSampleId': externalSampleId
       });
 
-      return res.json({
-        ok: true
+      if (existingImported) {
+        return res.status(200).json({
+          ok: true,
+          status: 'duplicate',
+          id: existingImported._id.toString()
+        });
+      }
+
+      const existingAtSameRecordedAt = await checkIns.findOne({
+        userId: actor._id,
+        isDeleted: false,
+        recordedAt: rAt
+      });
+
+      if (existingAtSameRecordedAt) {
+        return res.status(200).json({
+          ok: true,
+          status: 'conflict_existing_checkin',
+          existingCheckInId: existingAtSameRecordedAt._id.toString()
+        });
+      }
+
+      const now = new Date();
+
+      const doc = {
+        userId: actor._id,
+        recordedAt: rAt,
+        metrics: {
+          weightKg,
+          notes: ''
+        },
+        hasPhotos: false,
+        createdAt: now,
+        createdByUserId: actor._id,
+        updatedAt: null,
+        isDeleted: false,
+        source: {
+          type: 'apple_health',
+          integration: 'apple_health',
+          appSourceName,
+          deviceSourceName,
+          externalSampleId,
+          importedAt: now
+        }
+      };
+
+      const result = await checkIns.insertOne(doc);
+      const insertedCheckInId = result.insertedId;
+
+      const existingProfile = await userProfiles.findOne({ userId: actor._id });
+
+      const existingProfileWeightRecordedAt =
+        existingProfile?.weightRecordedAt instanceof Date
+          ? existingProfile.weightRecordedAt
+          : null;
+
+      const shouldUpdateProfileWeight =
+        !existingProfileWeightRecordedAt ||
+        rAt.getTime() >= existingProfileWeightRecordedAt.getTime();
+
+      if (shouldUpdateProfileWeight) {
+        await userProfiles.updateOne(
+          { userId: actor._id },
+          {
+            $set: {
+              weightKg,
+              weightRecordedAt: rAt,
+              updatedAt: now
+            }
+          }
+        );
+      }
+
+      return res.status(201).json({
+        ok: true,
+        status: 'created',
+        id: insertedCheckInId.toString()
       });
     } catch (err) {
-      console.error('[apple-health-weight-import] failed', err);
+      console.error('[checkIns/importAppleHealthWeight] failed', {
+        sub: sub ?? null,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined
+      });
 
       return res.status(500).json({
-        message: 'Import route failed'
+        message: 'Failed to import Apple Health weight'
       });
     }
   }
