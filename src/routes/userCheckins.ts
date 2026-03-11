@@ -347,6 +347,7 @@ checkInsRouter.post(
       const users = db.collection('users');
       const checkIns = db.collection('checkIns');
       const userProfiles = db.collection('userProfiles');
+      const userIntegrations = db.collection('userIntegrations');
 
       const actor = await users.findOne({ 'auth.cognitoSub': sub });
       if (!actor) {
@@ -354,6 +355,29 @@ checkInsRouter.post(
           .status(401)
           .json({ message: 'User not found for this token' });
       }
+
+      await userIntegrations.updateOne(
+        {
+          userId: actor._id,
+          integration: 'apple_health'
+        },
+        {
+          $setOnInsert: {
+            userId: actor._id,
+            integration: 'apple_health',
+            platform: 'ios',
+            status: 'connected',
+            permissions: {
+              weight: true
+            },
+            createdAt: new Date()
+          },
+          $set: {
+            updatedAt: new Date()
+          }
+        },
+        { upsert: true }
+      );
 
       const { externalSampleId, recordedAt, metrics, source } = req.body ?? {};
 
