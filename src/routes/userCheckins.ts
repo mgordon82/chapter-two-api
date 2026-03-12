@@ -419,8 +419,25 @@ checkInsRouter.post(
         'source.integration': 'apple_health',
         'source.externalSampleId': externalSampleId
       });
+      const now = new Date();
 
       if (existingImported) {
+        await userIntegrations.updateOne(
+          {
+            userId: actor._id,
+            integration: 'apple_health'
+          },
+          {
+            $set: {
+              updatedAt: now,
+              'lastSync.weightImportedAt': now
+            },
+            $max: {
+              'lastSync.weightRecordedAt': rAt
+            }
+          }
+        );
+
         return res.status(200).json({
           ok: true,
           status: 'duplicate',
@@ -435,14 +452,28 @@ checkInsRouter.post(
       });
 
       if (existingAtSameRecordedAt) {
+        await userIntegrations.updateOne(
+          {
+            userId: actor._id,
+            integration: 'apple_health'
+          },
+          {
+            $set: {
+              updatedAt: now,
+              'lastSync.weightImportedAt': now
+            },
+            $max: {
+              'lastSync.weightRecordedAt': rAt
+            }
+          }
+        );
+
         return res.status(200).json({
           ok: true,
           status: 'conflict_existing_checkin',
           existingCheckInId: existingAtSameRecordedAt._id.toString()
         });
       }
-
-      const now = new Date();
 
       const doc = {
         userId: actor._id,
