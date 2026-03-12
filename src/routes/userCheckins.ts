@@ -16,19 +16,46 @@ checkInsRouter.get('/current-user', requireCognitoAuth, async (req, res) => {
     const checkIns = db.collection('checkIns');
 
     const actor = await users.findOne({ 'auth.cognitoSub': sub });
-    if (!actor)
+    if (!actor) {
       return res.status(401).json({ message: 'User not found for this token' });
+    }
 
-    const limitRaw = req.query.limit;
-    const limit = Math.min(
-      200,
-      Math.max(1, Number.isFinite(Number(limitRaw)) ? Number(limitRaw) : 50)
-    );
+    const rangeRaw =
+      typeof req.query.range === 'string' ? req.query.range.trim() : '3M';
+
+    const end = new Date();
+    const start = new Date(end);
+
+    switch (rangeRaw) {
+      case '1W':
+        start.setDate(start.getDate() - 7);
+        break;
+      case '1M':
+        start.setMonth(start.getMonth() - 1);
+        break;
+      case '3M':
+        start.setMonth(start.getMonth() - 3);
+        break;
+      case '6M':
+        start.setMonth(start.getMonth() - 6);
+        break;
+      case '12M':
+        start.setFullYear(start.getFullYear() - 1);
+        break;
+      default:
+        return res.status(400).json({ message: 'Invalid range' });
+    }
 
     const rawItems = await checkIns
-      .find({ userId: actor._id, isDeleted: false })
+      .find({
+        userId: actor._id,
+        isDeleted: false,
+        recordedAt: {
+          $gte: start,
+          $lte: end
+        }
+      })
       .sort({ recordedAt: -1 })
-      .limit(limit)
       .toArray();
 
     const items = await Promise.all(
