@@ -477,8 +477,10 @@ checkInsRouter.post(
         {
           $set: {
             updatedAt: now,
-            'lastSync.weightRecordedAt': rAt,
             'lastSync.weightImportedAt': now
+          },
+          $max: {
+            'lastSync.weightRecordedAt': rAt
           }
         }
       );
