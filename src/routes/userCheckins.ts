@@ -525,3 +525,50 @@ checkInsRouter.post(
     }
   }
 );
+
+checkInsRouter.get(
+  '/current-user/integrations/apple-health',
+  requireCognitoAuth,
+  async (req, res) => {
+    const sub = req.cognito?.sub;
+
+    try {
+      if (!sub) {
+        return res.status(401).json({ message: 'Missing Cognito sub' });
+      }
+
+      const db = getDb();
+      const users = db.collection('users');
+      const userIntegrations = db.collection('userIntegrations');
+
+      const actor = await users.findOne({ 'auth.cognitoSub': sub });
+      if (!actor) {
+        return res
+          .status(401)
+          .json({ message: 'User not found for this token' });
+      }
+
+      const integration = await userIntegrations.findOne({
+        userId: actor._id,
+        integration: 'apple_health'
+      });
+
+      return res.json({
+        ok: true,
+        integration: integration
+          ? {
+              status: integration.status ?? null,
+              platform: integration.platform ?? null,
+              permissions: integration.permissions ?? {},
+              lastSync: integration.lastSync ?? null,
+              updatedAt: integration.updatedAt ?? null
+            }
+          : null
+      });
+    } catch (err) {
+      return res.status(500).json({
+        message: 'Failed to fetch Apple Health integration'
+      });
+    }
+  }
+);
