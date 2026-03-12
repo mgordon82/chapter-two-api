@@ -469,6 +469,20 @@ checkInsRouter.post(
       const result = await checkIns.insertOne(doc);
       const insertedCheckInId = result.insertedId;
 
+      await userIntegrations.updateOne(
+        {
+          userId: actor._id,
+          integration: 'apple_health'
+        },
+        {
+          $set: {
+            updatedAt: now,
+            'lastSync.weightRecordedAt': rAt,
+            'lastSync.weightImportedAt': now
+          }
+        }
+      );
+
       const existingProfile = await userProfiles.findOne({ userId: actor._id });
 
       const existingProfileWeightRecordedAt =
