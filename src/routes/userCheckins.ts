@@ -121,14 +121,6 @@ checkInsRouter.post('/current-user', requireCognitoAuth, async (req, res) => {
 
     const { recordedAt, weightKg, notes, progressPhotoSetId } = req.body ?? {};
 
-    console.info('[checkIns/create] start', {
-      sub,
-      userId: actor._id.toString(),
-      hasProgressPhotoSetId: Boolean(progressPhotoSetId),
-      progressPhotoSetId:
-        typeof progressPhotoSetId === 'string' ? progressPhotoSetId : null
-    });
-
     const w = Number(weightKg);
     if (!Number.isFinite(w) || w < 20 || w > 300) {
       console.warn('[checkIns/create] validation failed: invalid weightKg', {
@@ -240,13 +232,6 @@ checkInsRouter.post('/current-user', requireCognitoAuth, async (req, res) => {
     const result = await checkIns.insertOne(doc);
     const insertedCheckInId = result.insertedId;
 
-    console.info('[checkIns/create] check-in inserted', {
-      sub,
-      userId: actor._id.toString(),
-      checkInId: insertedCheckInId.toString(),
-      hasPhotos: Boolean(finalizedProgressPhotoSet)
-    });
-
     const profileUpdate = await userProfiles.updateOne(
       { userId: actor._id },
       {
@@ -280,13 +265,6 @@ checkInsRouter.post('/current-user', requireCognitoAuth, async (req, res) => {
           }
         }
       );
-
-      console.info('[checkIns/create] progress photo set attached', {
-        sub,
-        userId: actor._id.toString(),
-        progressPhotoSetId,
-        checkInId: insertedCheckInId.toString()
-      });
     }
 
     return res.status(201).json({

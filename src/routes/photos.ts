@@ -112,7 +112,7 @@ photosRouter.post('/starter/finalize', requireCognitoAuth, async (req, res) => {
       return res.status(401).json({ message: 'User not found for this token' });
     }
 
-    const { photoSetId, photos } = req.body ?? {};
+    const { photoSetId, photos, takenAt } = req.body ?? {};
 
     if (
       !photoSetId ||
@@ -122,6 +122,20 @@ photosRouter.post('/starter/finalize', requireCognitoAuth, async (req, res) => {
       return res
         .status(400)
         .json({ message: 'photoSetId must be a valid ObjectId string' });
+    }
+
+    let normalizedTakenAt: Date;
+
+    if (takenAt == null || takenAt === '') {
+      normalizedTakenAt = new Date();
+    } else {
+      normalizedTakenAt = new Date(takenAt);
+
+      if (Number.isNaN(normalizedTakenAt.getTime())) {
+        return res.status(400).json({
+          message: 'takenAt must be a valid ISO date string'
+        });
+      }
     }
 
     const validation = validateRequestedPhotoUploads(photos, {
@@ -159,7 +173,8 @@ photosRouter.post('/starter/finalize', requireCognitoAuth, async (req, res) => {
       mimeType: photo.mimeType,
       originalFileName: photo.originalFileName ?? null,
       sizeBytes: photo.sizeBytes ?? null,
-      uploadedAt: new Date()
+      uploadedAt: new Date(),
+      takenAt: normalizedTakenAt
     }));
 
     const now = new Date();
@@ -189,7 +204,8 @@ photosRouter.post('/starter/finalize', requireCognitoAuth, async (req, res) => {
           mimeType: photo.mimeType,
           originalFileName: photo.originalFileName ?? null,
           sizeBytes: photo.sizeBytes ?? null,
-          uploadedAt: photo.uploadedAt.toISOString()
+          uploadedAt: photo.uploadedAt.toISOString(),
+          takenAt: photo.takenAt.toISOString()
         }))
       }
     });
@@ -254,6 +270,10 @@ photosRouter.get('/starter', requireCognitoAuth, async (req, res) => {
             photo.uploadedAt instanceof Date
               ? photo.uploadedAt.toISOString()
               : photo.uploadedAt,
+          takenAt:
+            photo.takenAt instanceof Date
+              ? photo.takenAt.toISOString()
+              : photo.takenAt ?? null,
           viewUrl
         };
       })
@@ -316,14 +336,6 @@ photosRouter.post(
 
       const photoSetId = new ObjectId();
 
-      console.info('[photos/progress/upload-session] start', {
-        sub,
-        userId: actor._id.toString(),
-        photoSetId: photoSetId.toString(),
-        photoCount: validation.photos.length,
-        positions: validation.photos.map((photo) => photo.position)
-      });
-
       const uploads = await Promise.all(
         validation.photos.map(async (photo) => {
           const storageKey = buildProgressPhotoStorageKey({
@@ -364,13 +376,6 @@ photosRouter.post(
         createdByUserId: actor._id,
         updatedAt: null,
         isDeleted: false
-      });
-
-      console.info('[photos/progress/upload-session] success', {
-        sub,
-        userId: actor._id.toString(),
-        photoSetId: photoSetId.toString(),
-        photoCount: uploads.length
       });
 
       return res.status(201).json({
@@ -461,15 +466,6 @@ photosRouter.post(
         });
       }
 
-      console.info('[photos/progress/finalize] start', {
-        sub,
-        userId: actor._id.toString(),
-        photoSetId,
-        currentStatus: existingPhotoSet.status,
-        photoCount: validation.photos.length,
-        positions: validation.photos.map((photo) => photo.position)
-      });
-
       const finalizedPhotos = validation.photos.map((photo) => ({
         position: photo.position,
         storageKey: buildProgressPhotoStorageKey({
@@ -502,13 +498,6 @@ photosRouter.post(
           }
         }
       );
-
-      console.info('[photos/progress/finalize] success', {
-        sub,
-        userId: actor._id.toString(),
-        photoSetId,
-        photoCount: finalizedPhotos.length
-      });
 
       return res.status(201).json({
         ok: true,
