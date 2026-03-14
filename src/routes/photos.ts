@@ -24,7 +24,6 @@ photosRouter.post(
 
       const db = getDb();
       const users = db.collection('users');
-      const photoSets = db.collection('photoSets');
 
       const actor = await users.findOne({ 'auth.cognitoSub': sub });
       if (!actor) {
@@ -40,19 +39,6 @@ photosRouter.post(
 
       if (!validation.ok) {
         return res.status(400).json({ message: validation.message });
-      }
-
-      const existingStarterSet = await photoSets.findOne({
-        userId: actor._id,
-        type: 'starter',
-        status: 'active',
-        isDeleted: false
-      });
-
-      if (existingStarterSet) {
-        return res.status(409).json({
-          message: 'Active starter photos already exist for this user'
-        });
       }
 
       const photoSetId = new ObjectId();
@@ -154,12 +140,6 @@ photosRouter.post('/starter/finalize', requireCognitoAuth, async (req, res) => {
       isDeleted: false
     });
 
-    if (existingStarterSet) {
-      return res.status(409).json({
-        message: 'Active starter photos already exist for this user'
-      });
-    }
-
     const normalizedPhotoSetId = new ObjectId(photoSetId);
 
     const finalizedPhotos = validation.photos.map((photo) => ({
@@ -178,6 +158,18 @@ photosRouter.post('/starter/finalize', requireCognitoAuth, async (req, res) => {
     }));
 
     const now = new Date();
+
+    if (existingStarterSet) {
+      await photoSets.updateOne(
+        { _id: existingStarterSet._id },
+        {
+          $set: {
+            status: 'archived',
+            updatedAt: now
+          }
+        }
+      );
+    }
 
     const doc = {
       _id: normalizedPhotoSetId,
