@@ -18,6 +18,7 @@ const upsertSchema = z.object({
     heightCm: z.number().min(0).nullable(),
     weightKg: z.number().min(0).nullable(),
     goalWeightKg: z.number().min(0).nullable(),
+    stepGoalDaily: z.number().int().min(0).nullable(),
 
     activityLevel: z.string().nullable(),
     goal: z.string().nullable(),
@@ -87,6 +88,7 @@ userProfileRouter.put(
             heightCm: body.profile.heightCm,
             weightKg: body.profile.weightKg,
             goalWeightKg: body.profile.goalWeightKg,
+            stepGoalDaily: body.profile.stepGoalDaily,
 
             activityLevel: body.profile.activityLevel,
             goal: body.profile.goal,
@@ -178,6 +180,7 @@ userProfileRouter.get(
         heightCm: (profileDoc as any)?.heightCm ?? null,
         weightKg: (profileDoc as any)?.weightKg ?? null,
         goalWeightKg: (profileDoc as any)?.goalWeightKg ?? null,
+        stepGoalDaily: (profileDoc as any)?.stepGoalDaily ?? null,
         activityLevel: (profileDoc as any)?.activityLevel ?? null,
         goal: (profileDoc as any)?.goal ?? null,
         rateLevel: (profileDoc as any)?.rateLevel ?? null,
