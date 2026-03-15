@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { ObjectId } from 'mongodb';
 import {
   AdminCreateUserCommand,
   AdminGetUserCommand
@@ -22,12 +23,190 @@ const inviteSchema = z.object({
   displayName: z.string().min(1).max(80).optional()
 });
 
+const assignCoachSchema = z.object({
+  coachId: z.string().nullable()
+});
+
 function getAttr(
   attrs: { Name?: string; Value?: string }[] | undefined,
   name: string
 ) {
   return attrs?.find((a) => a.Name === name)?.Value ?? null;
 }
+
+usersRouter.get(
+  '/',
+  requireCognitoAuth,
+  requireAppUser,
+  requireRole(['admin', 'staff']),
+  async (_req, res) => {
+    try {
+      const db = getDb();
+
+      const docs = await db
+        .collection('users')
+        .aggregate([
+          {
+            $lookup: {
+              from: 'userProfiles',
+              localField: '_id',
+              foreignField: 'userId',
+              as: 'profile'
+            }
+          },
+          {
+            $unwind: {
+              path: '$profile',
+              preserveNullAndEmptyArrays: true
+            }
+          },
+          {
+            $lookup: {
+              from: 'users',
+              localField: 'profile.coachId',
+              foreignField: '_id',
+              as: 'coachUser'
+            }
+          },
+          {
+            $unwind: {
+              path: '$coachUser',
+              preserveNullAndEmptyArrays: true
+            }
+          },
+          {
+            $lookup: {
+              from: 'userProfiles',
+              localField: 'coachUser._id',
+              foreignField: 'userId',
+              as: 'coachProfile'
+            }
+          },
+          {
+            $unwind: {
+              path: '$coachProfile',
+              preserveNullAndEmptyArrays: true
+            }
+          },
+          {
+            $project: {
+              _id: 1,
+              email: 1,
+              role: 1,
+              status: 1,
+              createdAt: 1,
+              updatedAt: 1,
+              firstName: '$profile.firstName',
+              lastName: '$profile.lastName',
+              coachId: '$coachUser._id',
+              coachEmail: '$coachUser.email',
+              coachFirstName: '$coachProfile.firstName',
+              coachLastName: '$coachProfile.lastName'
+            }
+          },
+          {
+            $sort: {
+              createdAt: -1,
+              _id: -1
+            }
+          }
+        ])
+        .toArray();
+
+      return res.status(200).json({
+        items: docs.map((doc) => {
+          const firstName =
+            typeof doc.firstName === 'string' ? doc.firstName.trim() : '';
+          const lastName =
+            typeof doc.lastName === 'string' ? doc.lastName.trim() : '';
+          const fullName = [firstName, lastName].filter(Boolean).join(' ');
+
+          const coachFirstName =
+            typeof doc.coachFirstName === 'string'
+              ? doc.coachFirstName.trim()
+              : '';
+          const coachLastName =
+            typeof doc.coachLastName === 'string'
+              ? doc.coachLastName.trim()
+              : '';
+          const coachFullName = [coachFirstName, coachLastName]
+            .filter(Boolean)
+            .join(' ');
+
+          return {
+            id: String(doc._id),
+            displayName: fullName || null,
+            email: typeof doc.email === 'string' ? doc.email : '',
+            role: typeof doc.role === 'string' ? doc.role : null,
+            status: typeof doc.status === 'string' ? doc.status : null,
+            createdAt: doc.createdAt ?? null,
+            updatedAt: doc.updatedAt ?? null,
+            assignedCoach:
+              doc.coachId && typeof doc.coachEmail === 'string'
+                ? {
+                    id: String(doc.coachId),
+                    displayName: coachFullName || null,
+                    email: doc.coachEmail
+                  }
+                : null
+          };
+        })
+      });
+    } catch (err) {
+      console.error('List users error:', err);
+      return res.status(500).json({ message: 'Failed to list users' });
+    }
+  }
+);
+
+usersRouter.get(
+  '/coaches',
+  requireCognitoAuth,
+  requireAppUser,
+  requireRole(['admin', 'staff']),
+  async (_req, res) => {
+    try {
+      const db = getDb();
+      const users = db.collection('users');
+      const userProfiles = db.collection('userProfiles');
+
+      const coachUsers = await users.find({ role: 'coach' }).toArray();
+      const coachUserIds = coachUsers.map((user) => user._id);
+
+      const coachProfiles = await userProfiles
+        .find({ userId: { $in: coachUserIds } })
+        .toArray();
+
+      const items = coachUsers.map((user) => {
+        const profile = coachProfiles.find(
+          (p) => String((p as any).userId) === String(user._id)
+        );
+
+        const firstName =
+          typeof (profile as any)?.firstName === 'string'
+            ? (profile as any).firstName.trim()
+            : '';
+        const lastName =
+          typeof (profile as any)?.lastName === 'string'
+            ? (profile as any).lastName.trim()
+            : '';
+        const displayName = [firstName, lastName].filter(Boolean).join(' ');
+
+        return {
+          id: String(user._id),
+          email:
+            typeof (user as any).email === 'string' ? (user as any).email : '',
+          displayName: displayName || null
+        };
+      });
+
+      return res.status(200).json({ items });
+    } catch (err) {
+      console.error('List coaches error:', err);
+      return res.status(500).json({ message: 'Failed to load coaches' });
+    }
+  }
+);
 
 usersRouter.post(
   '/invite',
@@ -125,6 +304,102 @@ usersRouter.post(
       }
       console.error('Invite error:', err);
       return res.status(500).json({ message: 'Failed to invite user' });
+    }
+  }
+);
+
+usersRouter.post(
+  '/:userId/assign-coach',
+  requireCognitoAuth,
+  requireAppUser,
+  requireRole(['admin', 'staff']),
+  async (req, res) => {
+    const parsed = assignCoachSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: 'Invalid request body',
+        details: parsed.error.flatten()
+      });
+    }
+
+    const { coachId } = parsed.data;
+    const userIdParam = Array.isArray(req.params.userId)
+      ? req.params.userId[0]
+      : req.params.userId;
+
+    if (!ObjectId.isValid(userIdParam)) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+
+    if (coachId !== null && !ObjectId.isValid(coachId)) {
+      return res.status(400).json({ message: 'Invalid coach id' });
+    }
+
+    const db = getDb();
+    const now = new Date();
+    const userId = new ObjectId(userIdParam);
+
+    const users = db.collection('users');
+    const userProfiles = db.collection('userProfiles');
+
+    try {
+      const targetUser = await users.findOne({ _id: userId });
+
+      if (!targetUser) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      if (coachId !== null) {
+        const coachObjectId = new ObjectId(coachId);
+        const coachUser = await users.findOne({ _id: coachObjectId });
+
+        if (!coachUser) {
+          return res.status(404).json({ message: 'Coach not found' });
+        }
+
+        if ((coachUser as any).role !== 'coach') {
+          return res
+            .status(400)
+            .json({ message: 'Selected user is not a coach' });
+        }
+
+        await userProfiles.updateOne(
+          { userId },
+          {
+            $setOnInsert: {
+              userId,
+              createdAt: now
+            },
+            $set: {
+              coachId: coachObjectId,
+              coachAssignedAt: now,
+              updatedAt: now
+            }
+          },
+          { upsert: true }
+        );
+      } else {
+        await userProfiles.updateOne(
+          { userId },
+          {
+            $setOnInsert: {
+              userId,
+              createdAt: now
+            },
+            $set: {
+              coachId: null,
+              coachAssignedAt: null,
+              updatedAt: now
+            }
+          },
+          { upsert: true }
+        );
+      }
+
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error('Assign coach error:', err);
+      return res.status(500).json({ message: 'Failed to assign coach' });
     }
   }
 );
