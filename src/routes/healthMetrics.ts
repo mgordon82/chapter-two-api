@@ -39,9 +39,6 @@ healthMetricsRouter.post(
             integration: 'apple_health',
             platform: 'ios',
             status: 'connected',
-            permissions: {
-              steps: true
-            },
             createdAt: new Date()
           },
           $set: {
