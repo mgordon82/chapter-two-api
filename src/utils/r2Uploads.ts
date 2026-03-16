@@ -10,6 +10,9 @@ import {
 export const PHOTO_POSITIONS = ['front', 'side', 'back'] as const;
 export type PhotoPosition = (typeof PHOTO_POSITIONS)[number];
 
+const PHOTO_UPLOAD_URL_TTL_SECONDS = 300;
+const PHOTO_VIEW_URL_TTL_SECONDS = 3600;
+
 export type RequestedPhotoUpload = {
   position: PhotoPosition;
   mimeType: string;
@@ -150,7 +153,7 @@ export async function createSignedPhotoUploadUrl(params: {
   });
 
   const uploadUrl = await getSignedUrl(r2Client, command, {
-    expiresIn: params.expiresInSeconds ?? 300
+    expiresIn: params.expiresInSeconds ?? PHOTO_UPLOAD_URL_TTL_SECONDS
   });
 
   return uploadUrl;
@@ -166,7 +169,7 @@ export async function createSignedPhotoViewUrl(params: {
   });
 
   const viewUrl = await getSignedUrl(r2Client, command, {
-    expiresIn: params.expiresInSeconds ?? 300
+    expiresIn: params.expiresInSeconds ?? PHOTO_VIEW_URL_TTL_SECONDS
   });
 
   return viewUrl;

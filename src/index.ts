@@ -13,6 +13,7 @@ import { trendAnalysisRouter } from './routes/trendAnalysis';
 import { photosRouter } from './routes/photos';
 import { photoComparisonRouter } from './routes/photoComparison';
 import { healthMetricsRouter } from './routes/healthMetrics';
+import { clientProfileRouter } from './routes/clientProfile';
 
 const app = express();
 
@@ -71,6 +72,7 @@ app.use('/api/trend', trendAnalysisRouter);
 app.use('/api/photos', photosRouter);
 app.use('/api/photo-comparison', photoComparisonRouter);
 app.use('/api/health-metrics', healthMetricsRouter);
+app.use('/api/clients', clientProfileRouter);
 
 app.use((req, res) => {
   res.status(404).json({

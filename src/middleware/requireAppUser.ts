@@ -1,9 +1,12 @@
 import type { Request, Response, NextFunction } from 'express';
 import { getDb } from '../config/db';
 
+export type AppRole = 'client' | 'coach' | 'admin' | 'staff';
+
 export type AppUser = {
   _id: unknown;
-  role: string;
+  role?: AppRole | null;
+  roles?: AppRole[];
   email: string;
   displayName?: string | null;
   status: string;

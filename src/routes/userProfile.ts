@@ -79,7 +79,6 @@ userProfileRouter.put(
             createdAt: now
           },
           $set: {
-            role: (req.user as any).role ?? null,
             firstName: body.profile.firstName,
             lastName: body.profile.lastName,
             gender: body.profile.gender,

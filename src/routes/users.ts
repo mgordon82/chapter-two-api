@@ -14,14 +14,67 @@ import { requireRole } from '../middleware/requireRole';
 
 export const usersRouter = Router();
 
-const inviteSchema = z.object({
-  email: z
-    .string()
-    .email()
-    .transform((s) => s.toLowerCase().trim()),
-  role: z.enum(['client', 'coach', 'admin', 'staff']).default('client'),
-  displayName: z.string().min(1).max(80).optional()
-});
+type AppRole = 'client' | 'coach' | 'admin' | 'staff';
+
+const VALID_ROLES: AppRole[] = ['client', 'coach', 'admin', 'staff'];
+
+function isAppRole(value: unknown): value is AppRole {
+  return typeof value === 'string' && VALID_ROLES.includes(value as AppRole);
+}
+
+function normalizeRoles(input: unknown): AppRole[] {
+  if (!Array.isArray(input)) return [];
+
+  const filtered = input.filter(isAppRole);
+
+  return [...new Set(filtered)];
+}
+
+function getStoredUserRoles(user: any): AppRole[] {
+  const roles = normalizeRoles(user?.roles);
+  if (roles.length > 0) return roles;
+
+  return isAppRole(user?.role) ? [user.role] : [];
+}
+
+function expandRoles(roles: AppRole[]): AppRole[] {
+  const expanded = new Set<AppRole>(roles);
+
+  if (expanded.has('admin')) {
+    expanded.add('coach');
+    expanded.add('client');
+  }
+
+  if (expanded.has('coach')) {
+    expanded.add('client');
+  }
+
+  return Array.from(expanded);
+}
+
+const inviteSchema = z
+  .object({
+    email: z
+      .string()
+      .email()
+      .transform((s) => s.toLowerCase().trim()),
+    role: z.enum(['client', 'coach', 'admin', 'staff']).optional(),
+    roles: z.array(z.enum(['client', 'coach', 'admin', 'staff'])).optional(),
+    coachId: z.string().nullable().optional(),
+    displayName: z.string().min(1).max(80).optional()
+  })
+  .superRefine((data, ctx) => {
+    const hasRole = typeof data.role === 'string';
+    const hasRoles = Array.isArray(data.roles) && data.roles.length > 0;
+
+    if (!hasRole && !hasRoles) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'At least one role is required',
+        path: ['roles']
+      });
+    }
+  });
 
 const assignCoachSchema = z.object({
   coachId: z.string().nullable()
@@ -38,80 +91,100 @@ usersRouter.get(
   '/',
   requireCognitoAuth,
   requireAppUser,
-  requireRole(['admin', 'staff']),
-  async (_req, res) => {
+  requireRole(['admin', 'staff', 'coach']),
+  async (req, res) => {
     try {
       const db = getDb();
+      const requester = (req as any).user;
+      const requesterId = String((requester as any)?._id);
 
-      const docs = await db
-        .collection('users')
-        .aggregate([
-          {
-            $lookup: {
-              from: 'userProfiles',
-              localField: '_id',
-              foreignField: 'userId',
-              as: 'profile'
-            }
-          },
-          {
-            $unwind: {
-              path: '$profile',
-              preserveNullAndEmptyArrays: true
-            }
-          },
-          {
-            $lookup: {
-              from: 'users',
-              localField: 'profile.coachId',
-              foreignField: '_id',
-              as: 'coachUser'
-            }
-          },
-          {
-            $unwind: {
-              path: '$coachUser',
-              preserveNullAndEmptyArrays: true
-            }
-          },
-          {
-            $lookup: {
-              from: 'userProfiles',
-              localField: 'coachUser._id',
-              foreignField: 'userId',
-              as: 'coachProfile'
-            }
-          },
-          {
-            $unwind: {
-              path: '$coachProfile',
-              preserveNullAndEmptyArrays: true
-            }
-          },
-          {
-            $project: {
-              _id: 1,
-              email: 1,
-              role: 1,
-              status: 1,
-              createdAt: 1,
-              updatedAt: 1,
-              firstName: '$profile.firstName',
-              lastName: '$profile.lastName',
-              coachId: '$coachUser._id',
-              coachEmail: '$coachUser.email',
-              coachFirstName: '$coachProfile.firstName',
-              coachLastName: '$coachProfile.lastName'
-            }
-          },
-          {
-            $sort: {
-              createdAt: -1,
-              _id: -1
-            }
+      const requesterStoredRoles = getStoredUserRoles(requester);
+      const requesterEffectiveRoles = expandRoles(requesterStoredRoles);
+
+      const isAdminLike =
+        requesterEffectiveRoles.includes('admin') ||
+        requesterEffectiveRoles.includes('staff');
+
+      const pipeline: any[] = [
+        {
+          $lookup: {
+            from: 'userProfiles',
+            localField: '_id',
+            foreignField: 'userId',
+            as: 'profile'
           }
-        ])
-        .toArray();
+        },
+        {
+          $unwind: {
+            path: '$profile',
+            preserveNullAndEmptyArrays: true
+          }
+        }
+      ];
+
+      if (!isAdminLike) {
+        pipeline.push({
+          $match: {
+            'profile.coachId': new ObjectId(requesterId)
+          }
+        });
+      }
+
+      pipeline.push(
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'profile.coachId',
+            foreignField: '_id',
+            as: 'coachUser'
+          }
+        },
+        {
+          $unwind: {
+            path: '$coachUser',
+            preserveNullAndEmptyArrays: true
+          }
+        },
+        {
+          $lookup: {
+            from: 'userProfiles',
+            localField: 'coachUser._id',
+            foreignField: 'userId',
+            as: 'coachProfile'
+          }
+        },
+        {
+          $unwind: {
+            path: '$coachProfile',
+            preserveNullAndEmptyArrays: true
+          }
+        },
+        {
+          $project: {
+            _id: 1,
+            email: 1,
+            role: 1,
+            roles: 1,
+            status: 1,
+            createdAt: 1,
+            updatedAt: 1,
+            firstName: '$profile.firstName',
+            lastName: '$profile.lastName',
+            coachId: '$coachUser._id',
+            coachEmail: '$coachUser.email',
+            coachFirstName: '$coachProfile.firstName',
+            coachLastName: '$coachProfile.lastName'
+          }
+        },
+        {
+          $sort: {
+            createdAt: -1,
+            _id: -1
+          }
+        }
+      );
+
+      const docs = await db.collection('users').aggregate(pipeline).toArray();
 
       return res.status(200).json({
         items: docs.map((doc) => {
@@ -133,11 +206,22 @@ usersRouter.get(
             .filter(Boolean)
             .join(' ');
 
+          const mappedRoles = normalizeRoles((doc as any).roles);
+          const responseRoles =
+            mappedRoles.length > 0
+              ? mappedRoles
+              : isAppRole((doc as any).role)
+              ? [(doc as any).role]
+              : [];
+
           return {
             id: String(doc._id),
             displayName: fullName || null,
             email: typeof doc.email === 'string' ? doc.email : '',
-            role: typeof doc.role === 'string' ? doc.role : null,
+            role: isAppRole((doc as any).role)
+              ? (doc as any).role
+              : responseRoles[0] ?? null,
+            roles: responseRoles,
             status: typeof doc.status === 'string' ? doc.status : null,
             createdAt: doc.createdAt ?? null,
             updatedAt: doc.updatedAt ?? null,
@@ -170,7 +254,11 @@ usersRouter.get(
       const users = db.collection('users');
       const userProfiles = db.collection('userProfiles');
 
-      const coachUsers = await users.find({ role: 'coach' }).toArray();
+      const coachUsers = await users
+        .find({
+          $or: [{ role: 'coach' }, { roles: 'coach' }]
+        })
+        .toArray();
       const coachUserIds = coachUsers.map((user) => user._id);
 
       const coachProfiles = await userProfiles
@@ -222,7 +310,61 @@ usersRouter.post(
       });
     }
 
-    const { email, role, displayName } = parsed.data;
+    const {
+      email,
+      role,
+      roles: rolesInput,
+      coachId,
+      displayName
+    } = parsed.data;
+
+    const roles = normalizeRoles(
+      Array.isArray(rolesInput) && rolesInput.length > 0
+        ? rolesInput
+        : role
+        ? [role]
+        : []
+    );
+
+    if (roles.length === 0) {
+      return res
+        .status(400)
+        .json({ message: 'At least one valid role is required' });
+    }
+
+    const primaryRole = roles[0];
+
+    const inviter = (req as any).user;
+    const inviterStoredRoles = getStoredUserRoles(inviter);
+    const inviterEffectiveRoles = expandRoles(inviterStoredRoles);
+
+    const isAdminLike =
+      inviterEffectiveRoles.includes('admin') ||
+      inviterEffectiveRoles.includes('staff');
+
+    const isCoachOnly = inviterEffectiveRoles.includes('coach') && !isAdminLike;
+
+    let resolvedCoachId: ObjectId | null = null;
+
+    if (coachId !== null && coachId !== undefined && coachId !== '') {
+      if (!ObjectId.isValid(coachId)) {
+        return res.status(400).json({ message: 'Invalid coach id' });
+      }
+
+      const requestedCoachObjectId = new ObjectId(coachId);
+
+      if (isCoachOnly) {
+        if (String(inviter?._id) !== coachId) {
+          return res.status(403).json({
+            message: 'Coaches may only assign invited users to themselves'
+          });
+        }
+
+        resolvedCoachId = requestedCoachObjectId;
+      } else {
+        resolvedCoachId = requestedCoachObjectId;
+      }
+    }
 
     const userPoolId = process.env.COGNITO_USER_POOL_ID;
     if (!userPoolId) {
@@ -264,6 +406,25 @@ usersRouter.post(
       const users = db.collection('users');
       const now = new Date();
 
+      const userProfiles = db.collection('userProfiles');
+
+      if (resolvedCoachId) {
+        const coachUser = await users.findOne({ _id: resolvedCoachId });
+
+        if (!coachUser) {
+          return res.status(404).json({ message: 'Coach not found' });
+        }
+
+        const coachRoles = expandRoles(getStoredUserRoles(coachUser));
+        const isCoach = coachRoles.includes('coach');
+
+        if (!isCoach) {
+          return res
+            .status(400)
+            .json({ message: 'Selected user is not a coach' });
+        }
+      }
+
       const safeDisplayName =
         typeof displayName === 'string' && displayName.trim().length > 0
           ? displayName.trim()
@@ -274,13 +435,16 @@ usersRouter.post(
         {
           $setOnInsert: {
             email,
-            role,
+            role: primaryRole,
+            roles,
             status: 'invited',
             createdAt: now,
             ...(safeDisplayName ? { displayName: safeDisplayName } : {})
           },
           $set: {
             auth: { cognitoSub },
+            roles,
+            role: primaryRole,
             updatedAt: now
           }
         },
@@ -289,10 +453,40 @@ usersRouter.post(
 
       const user = await users.findOne({ email });
 
+      if (user) {
+        const invitedUserId = new ObjectId(String((user as any)._id));
+
+        await userProfiles.updateOne(
+          { userId: invitedUserId },
+          {
+            $setOnInsert: {
+              userId: invitedUserId,
+              createdAt: now
+            },
+            $set: {
+              coachId: resolvedCoachId,
+              coachAssignedAt: resolvedCoachId ? now : null,
+              updatedAt: now
+            }
+          },
+          { upsert: true }
+        );
+      }
+
+      const savedRoles = normalizeRoles((user as any)?.roles);
+      const responseRoles =
+        savedRoles.length > 0
+          ? savedRoles
+          : isAppRole((user as any)?.role)
+          ? [(user as any).role]
+          : roles;
+
       return res.status(201).json({
         id: user ? String(user._id) : null,
         email,
-        role: (user as any)?.role ?? role,
+        role: (user as any)?.role ?? primaryRole,
+        roles: responseRoles,
+        coachId: resolvedCoachId ? String(resolvedCoachId) : null,
         status: (user as any)?.status ?? 'invited',
         cognitoSub
       });
@@ -304,6 +498,74 @@ usersRouter.post(
       }
       console.error('Invite error:', err);
       return res.status(500).json({ message: 'Failed to invite user' });
+    }
+  }
+);
+
+const updateRolesSchema = z.object({
+  roles: z.array(z.enum(['client', 'coach', 'admin', 'staff'])).min(1)
+});
+
+usersRouter.patch(
+  '/:userId/roles',
+  requireCognitoAuth,
+  requireAppUser,
+  requireRole(['admin', 'staff']),
+  async (req, res) => {
+    const parsed = updateRolesSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: 'Invalid request body',
+        details: parsed.error.flatten()
+      });
+    }
+
+    const { roles } = parsed.data;
+
+    const userIdParam = Array.isArray(req.params.userId)
+      ? req.params.userId[0]
+      : req.params.userId;
+
+    if (!ObjectId.isValid(userIdParam)) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+
+    const db = getDb();
+    const users = db.collection('users');
+
+    const userId = new ObjectId(userIdParam);
+    const now = new Date();
+
+    try {
+      const primaryRole = roles[0];
+
+      const result = await users.updateOne(
+        { _id: userId },
+        {
+          $set: {
+            roles,
+            role: primaryRole,
+            updatedAt: now
+          }
+        }
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      return res.status(200).json({
+        ok: true,
+        user: {
+          id: userIdParam,
+          role: primaryRole,
+          roles
+        }
+      });
+    } catch (err) {
+      console.error('Update roles error:', err);
+      return res.status(500).json({ message: 'Failed to update roles' });
     }
   }
 );
@@ -357,7 +619,12 @@ usersRouter.post(
           return res.status(404).json({ message: 'Coach not found' });
         }
 
-        if ((coachUser as any).role !== 'coach') {
+        const coachUserRoles = normalizeRoles((coachUser as any).roles);
+        const isCoach =
+          coachUserRoles.includes('coach') ||
+          (coachUser as any).role === 'coach';
+
+        if (!isCoach) {
           return res
             .status(400)
             .json({ message: 'Selected user is not a coach' });
