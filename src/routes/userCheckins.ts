@@ -378,7 +378,8 @@ checkInsRouter.post(
             createdAt: new Date()
           },
           $set: {
-            updatedAt: new Date()
+            updatedAt: new Date(),
+            'permissions.weight': true
           }
         },
         { upsert: true }
