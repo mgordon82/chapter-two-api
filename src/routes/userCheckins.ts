@@ -372,9 +372,6 @@ checkInsRouter.post(
             integration: 'apple_health',
             platform: 'ios',
             status: 'connected',
-            permissions: {
-              weight: true
-            },
             createdAt: new Date()
           },
           $set: {
