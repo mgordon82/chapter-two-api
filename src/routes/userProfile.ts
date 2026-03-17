@@ -19,6 +19,7 @@ const upsertSchema = z.object({
     weightKg: z.number().min(0).nullable(),
     goalWeightKg: z.number().min(0).nullable(),
     stepGoalDaily: z.number().int().min(0).nullable(),
+    waterGoalDailyMl: z.number().int().min(0).nullable(),
 
     activityLevel: z.string().nullable(),
     goal: z.string().nullable(),
@@ -26,7 +27,8 @@ const upsertSchema = z.object({
 
     preferences: z.object({
       measurementUnitPref: z.string(),
-      weightUnitPref: z.string()
+      weightUnitPref: z.string(),
+      volumeUnitPref: z.string()
     })
   }),
 
@@ -88,6 +90,7 @@ userProfileRouter.put(
             weightKg: body.profile.weightKg,
             goalWeightKg: body.profile.goalWeightKg,
             stepGoalDaily: body.profile.stepGoalDaily,
+            waterGoalDailyMl: body.profile.waterGoalDailyMl,
 
             activityLevel: body.profile.activityLevel,
             goal: body.profile.goal,
@@ -95,7 +98,8 @@ userProfileRouter.put(
 
             preferences: {
               measurementUnitPref: body.profile.preferences.measurementUnitPref,
-              weightUnitPref: body.profile.preferences.weightUnitPref
+              weightUnitPref: body.profile.preferences.weightUnitPref,
+              volumeUnitPref: body.profile.preferences.volumeUnitPref
             },
 
             calculated: {
@@ -180,6 +184,7 @@ userProfileRouter.get(
         weightKg: (profileDoc as any)?.weightKg ?? null,
         goalWeightKg: (profileDoc as any)?.goalWeightKg ?? null,
         stepGoalDaily: (profileDoc as any)?.stepGoalDaily ?? null,
+        waterGoalDailyMl: (profileDoc as any)?.waterGoalDailyMl ?? null,
         activityLevel: (profileDoc as any)?.activityLevel ?? null,
         goal: (profileDoc as any)?.goal ?? null,
         rateLevel: (profileDoc as any)?.rateLevel ?? null,
@@ -187,7 +192,9 @@ userProfileRouter.get(
           measurementUnitPref:
             (profileDoc as any)?.preferences?.measurementUnitPref ?? 'cm',
           weightUnitPref:
-            (profileDoc as any)?.preferences?.weightUnitPref ?? 'kg'
+            (profileDoc as any)?.preferences?.weightUnitPref ?? 'kg',
+          volumeUnitPref:
+            (profileDoc as any)?.preferences?.volumeUnitPref ?? 'ml'
         }
       },
       calculated: {
