@@ -7,9 +7,6 @@ import { requireAppUser } from '../middleware/requireAppUser';
 
 export const planRouter = Router();
 
-/**
- * Legacy request (free-form text)
- */
 const mealPlanTextRequestSchema = z.object({
   planText: z
     .string()
@@ -20,10 +17,6 @@ const mealPlanTextRequestSchema = z.object({
     )
 });
 
-/**
- * New request (structured macros)
- * Note: UI sends "fats", response schema uses "fat".
- */
 const mealPlanMacrosRequestSchema = z.object({
   macros: z.object({
     calories: z.number().int().min(0),

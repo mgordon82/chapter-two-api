@@ -65,7 +65,7 @@ app.use('/api/plan/analyze', analyzeLimiter, analyzeFailsafe);
 
 app.use('/api/plan', planRouter);
 
-app.use('/api', currentUserRouter);
+app.use('/api/current-user', currentUserRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/check-ins', checkInsRouter);
 app.use('/api/trend', trendAnalysisRouter);

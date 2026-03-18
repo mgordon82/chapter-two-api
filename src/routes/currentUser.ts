@@ -38,7 +38,7 @@ function normalizeRoles(user: any): AppRole[] {
   return [];
 }
 
-currentUserRouter.get('/current-user', requireCognitoAuth, async (req, res) => {
+currentUserRouter.get('/', requireCognitoAuth, async (req, res) => {
   const claims = req.cognito;
   const sub = claims?.sub;
 
