@@ -599,19 +599,6 @@ checkInsRouter.get(
         isDeleted: false
       });
 
-      console.log('[checkIns/by-date] result', {
-        dateParam,
-        periodKey,
-        foundId: item?._id?.toString?.() ?? null,
-        foundRecordedAt: item?.recordedAt ?? null,
-        foundRepresentedDate: item?.representedDate ?? null,
-        foundWeightKg:
-          item?.sections?.daily?.body?.weightKg?.overrideValue ??
-          item?.metrics?.weightKg ??
-          null,
-        sourceType: item?.source?.type ?? null
-      });
-
       let workingItem = item;
 
       if (workingItem) {
