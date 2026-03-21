@@ -44,7 +44,7 @@ export async function getOrCreateDailyCheckIn(params: {
     periodKey,
     periodStart,
     periodEnd,
-    representedDate: periodKey,
+    representedDate: targetDate,
     status: 'open',
     manualEditWindowEndsAt,
 
