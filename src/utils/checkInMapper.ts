@@ -191,7 +191,11 @@ export function mapCheckIn(doc: AnyDoc): MappedCheckIn {
   );
 
   const weightSource: 'manual' | 'apple_health' | 'legacy' | null =
-    manualWeight != null
+    manualWeight != null &&
+    appleHealthWeight != null &&
+    Number(manualWeight) === Number(appleHealthWeight)
+      ? 'apple_health'
+      : manualWeight != null
       ? 'manual'
       : appleHealthWeight != null
       ? 'apple_health'
@@ -199,7 +203,10 @@ export function mapCheckIn(doc: AnyDoc): MappedCheckIn {
       ? 'legacy'
       : null;
 
-  const hasWeightConflict = manualWeight != null && appleHealthWeight != null;
+  const hasWeightConflict =
+    manualWeight != null &&
+    appleHealthWeight != null &&
+    Number(manualWeight) !== Number(appleHealthWeight);
 
   const newStyleNotes = doc?.sections?.daily?.notes?.userNotes ?? null;
   const legacyNotes = doc?.metrics?.notes ?? null;
