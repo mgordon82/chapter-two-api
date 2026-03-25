@@ -42,6 +42,7 @@ clientProfileRouter.get(
     const nutritionSettings = db.collection('nutritionSettings');
     const checkIns = db.collection('checkIns');
     const photoSets = db.collection('photoSets');
+    const healthMetricDaily = db.collection('healthMetricDaily');
 
     const [
       userDoc,
@@ -109,6 +110,30 @@ clientProfileRouter.get(
         .sort({ recordedAt: -1 })
         .toArray()
     ]);
+    const latestCheckInDate =
+      typeof (latestCheckInDoc as any)?.periodKey === 'string'
+        ? (latestCheckInDoc as any).periodKey
+        : (latestCheckInDoc as any)?.representedDate instanceof Date
+        ? (latestCheckInDoc as any).representedDate.toISOString().slice(0, 10)
+        : null;
+
+    const latestStepsDoc = latestCheckInDate
+      ? await healthMetricDaily.findOne({
+          userId: targetUserId,
+          isDeleted: false,
+          metricType: 'steps',
+          date: latestCheckInDate
+        })
+      : null;
+
+    const latestWaterDoc = latestCheckInDate
+      ? await healthMetricDaily.findOne({
+          userId: targetUserId,
+          isDeleted: false,
+          metricType: 'water',
+          date: latestCheckInDate
+        })
+      : null;
 
     if (!userDoc) {
       return res.status(404).json({
@@ -180,9 +205,36 @@ clientProfileRouter.get(
         ? (profileDoc as any).heightCm
         : null;
 
+    const waterTargetMl =
+      typeof (profileDoc as any)?.waterGoalDailyMl === 'number'
+        ? (profileDoc as any).waterGoalDailyMl
+        : null;
+
     const latestWeightKg =
       typeof (latestCheckInDoc as any)?.metrics?.weightKg === 'number'
         ? (latestCheckInDoc as any).metrics.weightKg
+        : null;
+
+    const latestEnergy =
+      typeof (latestCheckInDoc as any)?.sections?.daily?.recovery
+        ?.energyLevel === 'number'
+        ? (latestCheckInDoc as any).sections.daily.recovery.energyLevel
+        : null;
+
+    const latestOnTrackLevel =
+      typeof (latestCheckInDoc as any)?.sections?.daily?.recovery
+        ?.onTrackLevel === 'number'
+        ? (latestCheckInDoc as any).sections.daily.recovery.onTrackLevel
+        : null;
+
+    const latestSteps =
+      typeof (latestStepsDoc as any)?.value === 'number'
+        ? (latestStepsDoc as any).value
+        : null;
+
+    const latestWaterMl =
+      typeof (latestWaterDoc as any)?.value === 'number'
+        ? (latestWaterDoc as any).value
         : null;
 
     const latestNotes =
@@ -339,7 +391,7 @@ clientProfileRouter.get(
           carbsGrams: (nutritionDoc as any)?.targets?.carbs ?? null,
           fatGrams: (nutritionDoc as any)?.targets?.fats ?? null
         },
-        waterTargetOz: null,
+        waterTargetMl,
         fiberTargetGrams: null,
         mealPlanStyle: (nutritionDoc as any)?.preferences?.dietStyle ?? null,
         phase: (profileDoc as any)?.goal ?? null,
@@ -378,13 +430,14 @@ clientProfileRouter.get(
             bodyFatPercent: null,
             waistCm: null,
             waistDisplay: null,
-            energy: null,
+            waterMl: latestWaterMl,
+            energy: latestEnergy,
+            onTrackLevel: latestOnTrackLevel,
             sleepHours: null,
-            steps: null,
+            steps: latestSteps,
             workoutCount: null,
             adherence: null,
             notes: latestNotes,
-            mood: null,
             hasPhotos: Boolean((latestCheckInDoc as any)?.hasPhotos)
           }
         : null,

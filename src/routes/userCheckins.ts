@@ -148,6 +148,7 @@ checkInsRouter.post('/current-user', requireCognitoAuth, async (req, res) => {
       notes,
       progressPhotoSetId,
       energyLevel,
+      onTrackLevel,
       calories,
       proteinGrams,
       restingHeartRate,
@@ -230,6 +231,21 @@ checkInsRouter.post('/current-user', requireCognitoAuth, async (req, res) => {
         });
       }
       parsedEnergyLevel = e;
+    }
+
+    let parsedOnTrackLevel: number | null = null;
+    if (
+      onTrackLevel !== undefined &&
+      onTrackLevel !== null &&
+      String(onTrackLevel).trim() !== ''
+    ) {
+      const otl = Number(onTrackLevel);
+      if (!Number.isFinite(otl) || otl < 1 || otl > 10) {
+        return res.status(400).json({
+          message: 'onTrackLevel must be a number between 1 and 10'
+        });
+      }
+      parsedOnTrackLevel = otl;
     }
 
     let parsedCalories: number | null = null;
@@ -418,6 +434,10 @@ checkInsRouter.post('/current-user', requireCognitoAuth, async (req, res) => {
 
     if (parsedEnergyLevel !== null) {
       updateSet['sections.daily.recovery.energyLevel'] = parsedEnergyLevel;
+    }
+
+    if (parsedOnTrackLevel !== null) {
+      updateSet['sections.daily.recovery.onTrackLevel'] = parsedOnTrackLevel;
     }
 
     if (parsedCalories !== null) {

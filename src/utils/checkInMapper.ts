@@ -96,6 +96,7 @@ export type MappedCheckIn = {
     weightKg: number;
   }>;
   energyLevel: number | null;
+  onTrackLevel: number | null;
   calories: number | null;
   proteinGrams: number | null;
   restingHeartRate: number | null;
@@ -247,6 +248,10 @@ export function mapCheckIn(doc: AnyDoc): MappedCheckIn {
     doc?.sections?.daily?.recovery?.energyLevel
   );
 
+  const onTrackLevel = toNumberOrNull(
+    doc?.sections?.daily?.recovery?.onTrackLevel
+  );
+
   const calories = toNumberOrNull(
     doc?.sections?.daily?.nutrition?.calories?.value
   );
@@ -300,6 +305,7 @@ export function mapCheckIn(doc: AnyDoc): MappedCheckIn {
   const hasCoreDailyMetrics =
     weightKg !== null ||
     energyLevel !== null ||
+    onTrackLevel !== null ||
     restingHeartRate !== null ||
     steps !== null ||
     totalExerciseMinutes !== null ||
@@ -338,6 +344,7 @@ export function mapCheckIn(doc: AnyDoc): MappedCheckIn {
     weightSource,
     hasWeightConflict,
     energyLevel,
+    onTrackLevel,
     calories,
     proteinGrams,
     restingHeartRate,
