@@ -75,8 +75,8 @@ app.use('/api/photos', photosRouter);
 app.use('/api/photo-comparison', photoComparisonRouter);
 app.use('/api/health-metrics', healthMetricsRouter);
 app.use('/api/clients', clientProfileRouter);
-app.use('/api/exerciseSessions', exerciseSessionsRouter);
-app.use('/api/coachSummaries', coachSummariesRouter);
+app.use('/api/exercise-sessions', exerciseSessionsRouter);
+app.use('/api/coach-summaries', coachSummariesRouter);
 
 app.use((req, res) => {
   res.status(404).json({

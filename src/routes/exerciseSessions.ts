@@ -40,6 +40,7 @@ exerciseSessionsRouter.post(
         endedAt,
         sessionType,
         name,
+        focusArea,
         notes,
         metrics
       } = req.body ?? {};
@@ -145,7 +146,8 @@ exerciseSessionsRouter.post(
 
         sessionType: typeof sessionType === 'string' ? sessionType : null,
         name: name.trim(),
-        notes: typeof notes === 'string' ? notes : null,
+        focusArea: typeof focusArea === 'string' ? focusArea.trim() : null,
+        notes: typeof notes === 'string' ? notes.trim() : null,
 
         metrics: {
           durationMinutes,

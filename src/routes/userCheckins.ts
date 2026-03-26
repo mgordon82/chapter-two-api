@@ -996,6 +996,96 @@ checkInsRouter.post(
 );
 
 checkInsRouter.post(
+  '/current-user/exercise-sessions/update',
+  requireCognitoAuth,
+  async (req, res) => {
+    try {
+      const sub = req.cognito?.sub;
+      if (!sub) {
+        return res.status(401).json({ message: 'Missing Cognito sub' });
+      }
+
+      const { updates } = req.body ?? {};
+
+      if (!Array.isArray(updates)) {
+        return res.status(400).json({
+          message: 'updates must be an array'
+        });
+      }
+
+      const db = getDb();
+      const exerciseSessions = db.collection('exerciseSessions');
+
+      const { actor, error } = await getCurrentActor({
+        db,
+        cognitoSub: sub
+      });
+
+      if (error || !actor) {
+        return res.status(error?.status ?? 401).json({
+          message: error?.message ?? 'User not found for this token'
+        });
+      }
+
+      const now = new Date();
+
+      for (const update of updates) {
+        if (!update || typeof update !== 'object') {
+          return res.status(400).json({
+            message: 'Each update must be an object'
+          });
+        }
+
+        const id = typeof update.id === 'string' ? update.id : '';
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({
+            message: 'Each update.id must be a valid ObjectId string'
+          });
+        }
+
+        const focusArea =
+          typeof update.focusArea === 'string'
+            ? update.focusArea.trim()
+            : update.focusArea === null
+            ? null
+            : null;
+
+        const notes =
+          typeof update.notes === 'string'
+            ? update.notes.trim()
+            : update.notes === null
+            ? null
+            : null;
+
+        await exerciseSessions.updateOne(
+          {
+            _id: new ObjectId(id),
+            userId: actor._id,
+            isDeleted: false
+          },
+          {
+            $set: {
+              focusArea,
+              notes,
+              updatedAt: now
+            }
+          }
+        );
+      }
+
+      return res.json({
+        ok: true
+      });
+    } catch (err) {
+      return res.status(500).json({
+        message: 'Failed to update exercise sessions'
+      });
+    }
+  }
+);
+
+checkInsRouter.post(
   '/current-user/:id/coach-feedback',
   requireCognitoAuth,
   async (req, res) => {
