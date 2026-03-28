@@ -220,6 +220,7 @@ exerciseSessionsRouter.post(
         endDate,
         durationMinutes,
         activityType,
+        activityName,
         source
       } = req.body ?? {};
 
@@ -272,7 +273,10 @@ exerciseSessionsRouter.post(
         },
 
         sessionType: String(activityType ?? 'unknown'),
-        name: 'Workout',
+        name:
+          typeof activityName === 'string' && activityName.trim().length > 0
+            ? activityName.trim()
+            : 'Workout',
         focusArea: null,
         notes: null,
 
