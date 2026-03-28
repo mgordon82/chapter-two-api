@@ -302,6 +302,24 @@ exerciseSessionsRouter.post(
 
       const result = await exerciseSessions.insertOne(doc);
 
+      const userIntegrations = db.collection('userIntegrations');
+
+      await userIntegrations.updateOne(
+        {
+          userId: actor._id,
+          integration: 'apple_health'
+        },
+        {
+          $set: {
+            updatedAt: now,
+            'lastSync.workoutImportedAt': now
+          },
+          $max: {
+            'lastSync.workoutStartedAt': performedAt
+          }
+        }
+      );
+
       return res.status(201).json({
         ok: true,
         status: 'created',
