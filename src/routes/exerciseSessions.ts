@@ -190,6 +190,127 @@ exerciseSessionsRouter.post(
   }
 );
 
+exerciseSessionsRouter.post(
+  '/current-user/import/apple-health',
+  requireCognitoAuth,
+  async (req, res) => {
+    try {
+      const sub = req.cognito?.sub;
+      if (!sub) {
+        return res.status(401).json({ message: 'Missing Cognito sub' });
+      }
+
+      const db = getDb();
+      const exerciseSessions = db.collection('exerciseSessions');
+
+      const { actor, error } = await getCurrentActor({
+        db,
+        cognitoSub: sub
+      });
+
+      if (error || !actor) {
+        return res.status(error?.status ?? 401).json({
+          message: error?.message ?? 'User not found'
+        });
+      }
+
+      const {
+        externalId,
+        startDate,
+        endDate,
+        durationMinutes,
+        activityType,
+        source
+      } = req.body ?? {};
+
+      if (!externalId || !startDate) {
+        return res.status(400).json({
+          message: 'externalId and startDate are required'
+        });
+      }
+
+      const performedAt = new Date(startDate);
+      if (Number.isNaN(performedAt.getTime())) {
+        return res.status(400).json({
+          message: 'Invalid startDate'
+        });
+      }
+
+      // 🔒 prevent duplicates
+      const existing = await exerciseSessions.findOne({
+        userId: actor._id,
+        'source.integration': 'apple_health',
+        'source.externalId': externalId,
+        isDeleted: false
+      });
+
+      if (existing) {
+        return res.json({
+          ok: true,
+          status: 'duplicate',
+          id: existing._id.toString()
+        });
+      }
+
+      const now = new Date();
+
+      const doc = {
+        userId: actor._id,
+
+        performedAt,
+        localDateKey: getLocalDateKey(performedAt),
+        startedAt: performedAt,
+        endedAt: endDate ? new Date(endDate) : null,
+
+        source: {
+          type: 'imported',
+          integration: 'apple_health',
+          externalId,
+          importedAt: now,
+          appSourceName: source?.appSourceName ?? null,
+          deviceSourceName: source?.deviceSourceName ?? null
+        },
+
+        sessionType: String(activityType ?? 'unknown'),
+        name: 'Workout',
+        focusArea: null,
+        notes: null,
+
+        metrics: {
+          durationMinutes: durationMinutes ?? null,
+          caloriesBurned: null,
+          distanceMeters: null,
+          stepCount: null
+        },
+
+        links: {
+          plannedWorkoutId: null,
+          completedWorkoutId: null
+        },
+
+        createdAt: now,
+        createdByUserId: actor._id,
+        updatedAt: null,
+        updatedByUserId: null,
+
+        isDeleted: false
+      };
+
+      const result = await exerciseSessions.insertOne(doc);
+
+      return res.status(201).json({
+        ok: true,
+        status: 'created',
+        id: result.insertedId.toString()
+      });
+    } catch (err) {
+      return res.status(500).json({
+        message: 'Failed to import Apple Health workout'
+      });
+    }
+  }
+);
+
 exerciseSessionsRouter.get(
   '/current-user',
   requireCognitoAuth,
