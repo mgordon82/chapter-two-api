@@ -17,6 +17,7 @@ const upsertSchema = z.object({
 
     heightCm: z.number().min(0).nullable(),
     weightKg: z.number().min(0).nullable(),
+    startingWeightKg: z.number().min(0).nullable(),
     goalWeightKg: z.number().min(0).nullable(),
     stepGoalDaily: z.number().int().min(0).nullable(),
     waterGoalDailyMl: z.number().int().min(0).nullable(),
@@ -88,6 +89,7 @@ userProfileRouter.put(
 
             heightCm: body.profile.heightCm,
             weightKg: body.profile.weightKg,
+            startingWeightKg: body.profile.startingWeightKg,
             goalWeightKg: body.profile.goalWeightKg,
             stepGoalDaily: body.profile.stepGoalDaily,
             waterGoalDailyMl: body.profile.waterGoalDailyMl,
@@ -182,6 +184,7 @@ userProfileRouter.get(
         age: (profileDoc as any)?.age ?? null,
         heightCm: (profileDoc as any)?.heightCm ?? null,
         weightKg: (profileDoc as any)?.weightKg ?? null,
+        startingWeightKg: (profileDoc as any)?.startingWeightKg ?? null,
         goalWeightKg: (profileDoc as any)?.goalWeightKg ?? null,
         stepGoalDaily: (profileDoc as any)?.stepGoalDaily ?? null,
         waterGoalDailyMl: (profileDoc as any)?.waterGoalDailyMl ?? null,
