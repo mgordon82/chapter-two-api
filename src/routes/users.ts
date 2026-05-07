@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { ObjectId } from 'mongodb';
+import crypto from 'crypto';
 import {
   AdminCreateUserCommand,
   AdminGetUserCommand
@@ -11,6 +12,9 @@ import { requireCognitoAuth } from '../middleware/requireCognitoAuth';
 import { requireAppUser } from '../middleware/requireAppUser';
 import { userProfileRouter } from './userProfile';
 import { requireRole } from '../middleware/requireRole';
+import { sendEmail } from '../utils/sendEmail';
+import { buildInviteLink } from '../utils/buildInviteLink';
+import { buildChapterTwoInviteEmail } from '../emailTemplates/buildInviteEmail';
 
 export const usersRouter = Router();
 
@@ -52,6 +56,14 @@ function expandRoles(roles: AppRole[]): AppRole[] {
   return Array.from(expanded);
 }
 
+function generateInviteToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function hashInviteToken(token: string) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 const inviteSchema = z
   .object({
     email: z
@@ -61,7 +73,8 @@ const inviteSchema = z
     role: z.enum(['client', 'coach', 'admin', 'staff']).optional(),
     roles: z.array(z.enum(['client', 'coach', 'admin', 'staff'])).optional(),
     coachId: z.string().nullable().optional(),
-    displayName: z.string().min(1).max(80).optional()
+    displayName: z.string().min(1).max(80).optional(),
+    inviteToMiPT: z.boolean().optional()
   })
   .superRefine((data, ctx) => {
     const hasRole = typeof data.role === 'string';
@@ -166,6 +179,7 @@ usersRouter.get(
             role: 1,
             roles: 1,
             status: 1,
+            miptAccess: 1,
             createdAt: 1,
             updatedAt: 1,
             firstName: '$profile.firstName',
@@ -223,6 +237,11 @@ usersRouter.get(
               : responseRoles[0] ?? null,
             roles: responseRoles,
             status: typeof doc.status === 'string' ? doc.status : null,
+            miptAccess:
+              typeof (doc as any).miptAccess === 'object' &&
+              (doc as any).miptAccess
+                ? (doc as any).miptAccess
+                : { status: 'none', invitedAt: null },
             createdAt: doc.createdAt ?? null,
             updatedAt: doc.updatedAt ?? null,
             assignedCoach:
@@ -315,8 +334,16 @@ usersRouter.post(
       role,
       roles: rolesInput,
       coachId,
-      displayName
+      displayName,
+      inviteToMiPT
     } = parsed.data;
+
+    const shouldInviteToMiPT = inviteToMiPT ?? false;
+
+    const rawInviteToken = !shouldInviteToMiPT ? generateInviteToken() : null;
+    const hashedInviteToken = rawInviteToken
+      ? hashInviteToken(rawInviteToken)
+      : null;
 
     const roles = normalizeRoles(
       Array.isArray(rolesInput) && rolesInput.length > 0
@@ -367,39 +394,44 @@ usersRouter.post(
     }
 
     const userPoolId = process.env.COGNITO_USER_POOL_ID;
-    if (!userPoolId) {
+
+    if (shouldInviteToMiPT && !userPoolId) {
       return res.status(500).json({ message: 'Missing COGNITO_USER_POOL_ID' });
     }
 
     try {
-      const createRes = await cognito.send(
-        new AdminCreateUserCommand({
-          UserPoolId: userPoolId,
-          Username: email,
-          UserAttributes: [
-            { Name: 'email', Value: email },
-            { Name: 'email_verified', Value: 'true' }
-          ],
-          DesiredDeliveryMediums: ['EMAIL']
-        })
-      );
+      let cognitoSub: string | null = null;
 
-      let cognitoSub = getAttr(createRes.User?.Attributes, 'sub');
-
-      if (!cognitoSub) {
-        const getRes = await cognito.send(
-          new AdminGetUserCommand({
+      if (shouldInviteToMiPT) {
+        const createRes = await cognito.send(
+          new AdminCreateUserCommand({
             UserPoolId: userPoolId,
-            Username: email
+            Username: email,
+            UserAttributes: [
+              { Name: 'email', Value: email },
+              { Name: 'email_verified', Value: 'true' }
+            ],
+            DesiredDeliveryMediums: ['EMAIL']
           })
         );
-        cognitoSub = getAttr(getRes.UserAttributes, 'sub');
-      }
 
-      if (!cognitoSub) {
-        return res
-          .status(502)
-          .json({ message: 'Failed to determine Cognito sub' });
+        cognitoSub = getAttr(createRes.User?.Attributes, 'sub');
+
+        if (!cognitoSub) {
+          const getRes = await cognito.send(
+            new AdminGetUserCommand({
+              UserPoolId: userPoolId,
+              Username: email
+            })
+          );
+          cognitoSub = getAttr(getRes.UserAttributes, 'sub');
+        }
+
+        if (!cognitoSub) {
+          return res
+            .status(502)
+            .json({ message: 'Failed to determine Cognito sub' });
+        }
       }
 
       const db = getDb();
@@ -430,19 +462,55 @@ usersRouter.post(
           ? displayName.trim()
           : undefined;
 
+      const existingUser = await users.findOne({ email });
+
+      const existingStatus =
+        typeof (existingUser as any)?.status === 'string'
+          ? (existingUser as any).status
+          : null;
+
+      const existingMiptStatus =
+        typeof (existingUser as any)?.miptAccess?.status === 'string'
+          ? (existingUser as any).miptAccess.status
+          : 'none';
+
+      const nextStatus = shouldInviteToMiPT
+        ? existingStatus === 'active'
+          ? 'active'
+          : 'invited'
+        : existingStatus ?? 'prospect';
+
+      const nextMiptStatus = shouldInviteToMiPT
+        ? existingMiptStatus === 'active'
+          ? 'active'
+          : 'invited'
+        : existingMiptStatus;
+
       await users.updateOne(
         { email },
         {
           $setOnInsert: {
             email,
-            status: 'invited',
             createdAt: now,
             ...(safeDisplayName ? { displayName: safeDisplayName } : {})
           },
           $set: {
-            auth: { cognitoSub },
+            ...(hashedInviteToken
+              ? {
+                  inviteTokenHash: hashedInviteToken,
+                  inviteTokenCreatedAt: now
+                }
+              : {}),
+            ...(shouldInviteToMiPT && cognitoSub
+              ? { auth: { cognitoSub } }
+              : {}),
             roles,
             role: primaryRole,
+            status: nextStatus,
+            'miptAccess.status': nextMiptStatus,
+            ...(shouldInviteToMiPT && existingMiptStatus === 'none'
+              ? { 'miptAccess.invitedAt': now }
+              : {}),
             updatedAt: now
           }
         },
@@ -471,6 +539,25 @@ usersRouter.post(
         );
       }
 
+      if (user && !shouldInviteToMiPT) {
+        const inviteLink = buildInviteLink(
+          String((user as any)._id),
+          rawInviteToken as string
+        );
+
+        const emailTemplate = buildChapterTwoInviteEmail({
+          inviteLink,
+          displayName: safeDisplayName
+        });
+
+        await sendEmail({
+          to: email,
+          subject: emailTemplate.subject,
+          html: emailTemplate.html,
+          text: emailTemplate.text
+        });
+      }
+
       const savedRoles = normalizeRoles((user as any)?.roles);
       const responseRoles =
         savedRoles.length > 0
@@ -485,8 +572,14 @@ usersRouter.post(
         role: (user as any)?.role ?? primaryRole,
         roles: responseRoles,
         coachId: resolvedCoachId ? String(resolvedCoachId) : null,
-        status: (user as any)?.status ?? 'invited',
-        cognitoSub
+        status:
+          (user as any)?.status ??
+          (shouldInviteToMiPT ? 'invited' : 'prospect'),
+        cognitoSub: cognitoSub ?? null,
+        miptAccess:
+          user && typeof (user as any).miptAccess === 'object'
+            ? (user as any).miptAccess
+            : { status: 'none', invitedAt: null }
       });
     } catch (err: any) {
       if (err?.name === 'UsernameExistsException') {
@@ -677,7 +770,13 @@ usersRouter.post('/activate', requireCognitoAuth, async (req, res) => {
 
     const result = await users.updateOne(
       { 'auth.cognitoSub': req.cognito!.sub },
-      { $set: { status: 'active', updatedAt: now } }
+      {
+        $set: {
+          status: 'active',
+          'miptAccess.status': 'active',
+          updatedAt: now
+        }
+      }
     );
 
     if (result.matchedCount === 0) {

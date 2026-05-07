@@ -16,6 +16,7 @@ import { healthMetricsRouter } from './routes/healthMetrics';
 import { clientProfileRouter } from './routes/clientProfile';
 import { exerciseSessionsRouter } from './routes/exerciseSessions';
 import { coachSummariesRouter } from './routes/coachSummaries';
+import { invitationsRouter } from './routes/invitations';
 
 const app = express();
 
@@ -77,6 +78,7 @@ app.use('/api/health-metrics', healthMetricsRouter);
 app.use('/api/clients', clientProfileRouter);
 app.use('/api/exercise-sessions', exerciseSessionsRouter);
 app.use('/api/coach-summaries', coachSummariesRouter);
+app.use('/api/invitations', invitationsRouter);
 
 app.use((req, res) => {
   res.status(404).json({
